@@ -38,7 +38,7 @@ high missingness, and correlated sensors.
 - **Serving:** FastAPI REST endpoint + Dockerized for deployment
 
 ## Repo Structure
-\`\`\`
+```
 ├── api/
 │ ├── main.py # FastAPI app
 │ └── schema.py # Request/response schemas
@@ -56,10 +56,10 @@ high missingness, and correlated sensors.
 ├── Dockerfile
 ├── requirements.txt
 └── README.md
-\`\`\`
+```
 
 ## Setup
-\`\`\`bash
+```bash
 pip install -r requirements.txt
 jupyter notebook notebooks/01_eda.ipynb # downloads data automatically
-\`\`\`
+```
