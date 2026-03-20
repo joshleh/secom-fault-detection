@@ -17,7 +17,7 @@ high missingness, and correlated sensors.
 | Phase | Status |
 |---|---|
 | EDA | ✅ Complete |
-| Feature Engineering | 🔲 Planned |
+| Feature Engineering | ✅ Complete |
 | Modeling + MLflow Tracking | 🔲 Planned |
 | Explainability (SHAP) | 🔲 Planned |
 | FastAPI Serving | 🔲 Planned |
