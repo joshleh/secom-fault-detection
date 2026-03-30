@@ -163,3 +163,9 @@ docker run -p 8000:8000 secom-api
 - **Evaluation:** PR-AUC and recall prioritized — missing a failure costs more than a false alarm
 - **Explainability:** SHAP TreeExplainer — beeswarm, dependence, and waterfall plots
 - **Serving:** FastAPI with SHAP explanations per prediction, Dockerized for deployment
+
+## Future Work
+- Threshold tuning with PR-curve optimization for production alert sensitivity
+- Data drift monitoring on incoming sensor streams (concept drift detection)
+- Cloud deployment (Azure ML or AWS SageMaker) with CI/CD pipeline
+- Integration with time-series monitoring dashboards for real-time yield tracking
