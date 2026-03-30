@@ -216,3 +216,5 @@ data/
 __pycache__/
 *.pyc
 .env
+mlruns/
+models/
