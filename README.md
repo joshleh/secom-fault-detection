@@ -19,7 +19,7 @@ high missingness, and correlated sensors.
 | EDA | ✅ Complete |
 | Feature Engineering | ✅ Complete |
 | Modeling + MLflow Tracking | ✅ Complete |
-| Explainability (SHAP) | 🔲 Planned |
+| Explainability (SHAP) | ✅ Complete |
 | FastAPI Serving | 🔲 Planned |
 | Docker Deployment | 🔲 Planned |
 
@@ -44,13 +44,22 @@ is expected — SECOM features lack true sequential structure, and 1,170
 pass-only training samples is small for deep learning. Top predictive sensors
 include sensor_103, sensor_59, and sensor_33.
 
+## Explainability (SHAP)
+SHAP TreeExplainer on the Random Forest reveals that a small subset of sensors
+drives most of the model's fault predictions — **sensor_103** and **sensor_59**
+have the highest mean |SHAP| values. Dependence plots show non-linear threshold
+effects (sensor readings are benign until a critical value, then failure risk
+spikes), and interaction coloring surfaces coupled sensor pairs that likely map
+to the same process step. Full beeswarm, dependence, and waterfall plots are in
+`notebooks/04_explainability.ipynb`.
+
 ## Approach
 - **Preprocessing:** Median imputation, zero-variance removal, standard scaling
 - **Models:** Isolation Forest (unsupervised baseline), Random Forest with class weighting (supervised baseline), LSTM Autoencoder trained on pass-only data (deep learning)
 - **Imbalance handling:** Class weighting + decision threshold tuning
 - **Tracking:** MLflow experiment tracking with params, metrics, confusion matrices, and serialized models
 - **Evaluation:** PR-AUC and recall prioritized — missing a failure costs more than a false alarm
-- **Explainability:** SHAP feature importance (next)
+- **Explainability:** SHAP TreeExplainer — beeswarm, dependence, and waterfall plots with stakeholder-facing interpretation
 - **Serving:** FastAPI REST endpoint + Docker (planned)
 
 ## Repo Structure
@@ -59,7 +68,8 @@ include sensor_103, sensor_59, and sensor_33.
 ├── notebooks/
 │   ├── 01_eda.ipynb            # Data loading & exploratory analysis
 │   ├── 02_modeling.ipynb       # Feature engineering & baseline models
-│   └── 03_model_comparison.ipynb  # Multi-model comparison + MLflow
+│   ├── 03_model_comparison.ipynb  # Multi-model comparison + MLflow
+│   └── 04_explainability.ipynb    # SHAP analysis + stakeholder interpretation
 ├── src/
 │   ├── preprocess.py
 │   ├── features.py
