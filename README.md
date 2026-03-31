@@ -107,8 +107,7 @@ drove each prediction.
 ├── src/
 │   ├── preprocess.py           # Variance filter, scaling, imputation
 │   ├── features.py             # Correlation filter, MI selection
-│   ├── train.py                # Train RF + save all pipeline artifacts
-│   └── evaluate.py             # Evaluation utilities
+│   └── train.py                # Train RF + save all pipeline artifacts
 ├── tests/
 │   └── test_api.py             # API smoke tests
 ├── models/                     # Saved artifacts (created by train.py)
