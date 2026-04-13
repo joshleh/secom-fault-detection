@@ -1,4 +1,4 @@
-# Semiconductor Yield Debug Dashboard
+# Semiconductor Yield Fault Detection
 
 ML-driven diagnostic tool for investigating semiconductor manufacturing failures.
 Combines a trained fault-detection model with interactive root-cause analysis,
