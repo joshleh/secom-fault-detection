@@ -1,14 +1,18 @@
 """
-diagnostics.py — Yield debug analysis engine for SECOM fault detection.
+diagnostics.py — Analysis engine for the SECOM fault detection dashboard.
 
-Provides baseline computation, per-sample deviation analysis, and
-rule-based root-cause summary generation. Used by both the Streamlit
-dashboard and the yield debug notebook (`05_yield_debug_analysis.ipynb`).
+Core idea: take a single wafer's sensor readings, run the trained model,
+and produce a full diagnostic report — what did the model predict, which
+sensors mattered most (SHAP), and how does this wafer compare to "normal"
+wafers that passed quality inspection (baseline deviation).
 
-Design:
-  - BaselineProfile stores pass-only population statistics
-  - SampleDiagnostics holds per-sample deviation + SHAP results
-  - generate_root_cause_summary produces grounded text (no LLM fluff)
+Used by both the Streamlit dashboard and the yield debug notebook
+(`05_yield_debug_analysis.ipynb`).
+
+Key classes:
+  - BaselineProfile: statistics from wafers that passed (the "normal" reference)
+  - SampleDiagnostics: prediction + explanations for a single wafer
+  - generate_root_cause_summary(): builds a plain-English diagnostic summary
 """
 
 import json
@@ -28,7 +32,7 @@ from src.preprocess import load_clean, run_preprocessing_pipeline
 
 @dataclass
 class BaselineProfile:
-    """Statistics from pass-only (healthy) samples for the MI-selected features."""
+    """Statistics computed from wafers that passed — represents 'normal' behavior."""
     mean: pd.Series
     std: pd.Series
     median: pd.Series
@@ -39,7 +43,7 @@ class BaselineProfile:
 
 @dataclass
 class SampleDiagnostics:
-    """Full diagnostic result for a single wafer sample."""
+    """Complete diagnostic report for a single wafer (prediction + explanations)."""
     sample_index: int
     prediction: str
     probability: float
@@ -270,25 +274,25 @@ class DiagnosticsPipeline:
 def generate_root_cause_summary(diag: SampleDiagnostics, baseline: BaselineProfile,
                                  top_k: int = 5) -> str:
     """
-    Generate a grounded, rule-based root-cause summary.
+    Generate a plain-English diagnostic summary for one wafer.
 
     Not LLM-generated — this is deterministic text built from actual
-    SHAP values, z-scores, and feature rankings. The summary is designed
-    to read like an engineer's preliminary failure analysis note.
+    model outputs (SHAP values), deviation measurements (z-scores), and
+    feature rankings. Written to be understandable without domain expertise.
     """
     prob_pct = diag.probability * 100
 
     if diag.prediction == "PASS":
-        confidence = "low risk" if diag.probability < 0.2 else "marginal"
+        confidence = "low risk" if diag.probability < 0.2 else "borderline"
         header = (
-            f"**Sample #{diag.sample_index}** is predicted as **PASS** "
-            f"({confidence}, {prob_pct:.1f}% failure probability)."
+            f"**Wafer #{diag.sample_index}** is predicted as **PASS** "
+            f"({confidence}, {prob_pct:.1f}% chance of failure)."
         )
     else:
         confidence = "high risk" if diag.probability > 0.8 else "elevated risk"
         header = (
-            f"**Sample #{diag.sample_index}** is predicted as **FAIL** "
-            f"({confidence}, {prob_pct:.1f}% failure probability)."
+            f"**Wafer #{diag.sample_index}** is predicted as **FAIL** "
+            f"({confidence}, {prob_pct:.1f}% chance of failure)."
         )
 
     top_shap = diag.top_shap_features[:top_k]
@@ -296,20 +300,23 @@ def generate_root_cause_summary(diag: SampleDiagnostics, baseline: BaselineProfi
     overlap = [f for f in top_shap if f in set(top_deviated)]
 
     shap_list = ", ".join(top_shap[:3])
-    driver_line = f"Top model drivers: **{shap_list}**."
+    driver_line = (
+        f"The sensors that influenced the model's decision most: **{shap_list}**."
+    )
 
     if overlap:
         overlap_names = ", ".join(overlap[:3])
         deviation_line = (
-            f"Sensors **{overlap_names}** are both top model contributors and "
-            f"show significant deviation from the healthy production baseline."
+            f"Sensors **{overlap_names}** are both highly influential in the model's "
+            f"decision *and* show abnormal readings compared to wafers that passed — "
+            f"making them strong candidates for investigation."
         )
     else:
         dev_list = ", ".join(top_deviated[:3])
         deviation_line = (
-            f"Most deviated sensors ({dev_list}) differ from the top model "
-            f"drivers, suggesting the deviations may not directly cause failure "
-            f"but warrant process review."
+            f"The most abnormal sensors ({dev_list}) are not the same ones driving "
+            f"the model's prediction, which suggests the abnormalities may be symptoms "
+            f"rather than direct causes — still worth reviewing."
         )
 
     detail_lines = []
@@ -319,21 +326,27 @@ def generate_root_cause_summary(diag: SampleDiagnostics, baseline: BaselineProfi
         mean = baseline.mean.get(feat, 0)
         direction = "above" if z > 0 else "below"
         detail_lines.append(
-            f"- **{feat}**: value {val:.3f} ({abs(z):.1f}σ {direction} baseline mean {mean:.3f})"
+            f"- **{feat}**: reading = {val:.3f}, which is {abs(z):.1f} standard "
+            f"deviations {direction} the normal average ({mean:.3f})"
         )
     detail_block = "\n".join(detail_lines)
 
     if diag.prediction == "FAIL" and overlap:
         action = (
-            "**Recommended action:** Investigate the process steps associated with "
-            f"{', '.join(overlap[:3])} for potential excursion or tool drift."
+            "**Suggested next step:** Look into what happened during the manufacturing "
+            f"stages that affect {', '.join(overlap[:3])} — these sensors are both "
+            f"abnormal and important to the model's failure prediction."
         )
     elif diag.prediction == "FAIL":
         action = (
-            "**Recommended action:** Review recent process logs for anomalies. "
-            "The model's top drivers may reflect indirect effects of an upstream issue."
+            "**Suggested next step:** Review the manufacturing history for this wafer. "
+            "The model's top drivers may be reacting to an issue earlier in the process "
+            "that shows up indirectly in these sensors."
         )
     else:
-        action = "No immediate action required. Monitor these sensors on subsequent lots."
+        action = (
+            "No immediate concern. This wafer looks normal, but keep an eye on the "
+            "flagged sensors in future production runs."
+        )
 
     return f"{header}\n\n{driver_line}\n\n{deviation_line}\n\n{detail_block}\n\n{action}"

@@ -1,12 +1,14 @@
 """
-FastAPI serving endpoint for SECOM fault-detection model.
+FastAPI endpoint for SECOM fault-detection model.
 
-Reproduces the notebook 02 pipeline at inference time:
-  raw 446 features → variance filter → scale → correlation filter
-  → MI-selected 50 features → RF predict → SHAP explanation
+Takes 446 sensor readings for a single wafer and runs them through the
+same feature pipeline used during training:
+  446 sensors → remove low-variance → scale → remove correlated duplicates
+  → select top 50 → Random Forest prediction → SHAP explanation
 
-POST /predict  — pass/fail with probability + SHAP top contributors
-GET  /health   — liveness check with pipeline metadata
+Endpoints:
+  POST /predict  — returns pass/fail, probability, and top contributing sensors
+  GET  /health   — liveness check with pipeline metadata
 """
 
 import json
@@ -79,8 +81,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SECOM Fault Detection API",
     description=(
-        "Predicts semiconductor wafer pass/fail from 446 sensor readings. "
-        "Returns SHAP-based feature explanations with every prediction."
+        "Predicts whether a semiconductor wafer will pass or fail quality "
+        "inspection, based on 446 sensor readings from the manufacturing "
+        "process. Every prediction comes with a SHAP explanation showing "
+        "which sensors contributed most."
     ),
     version="1.0.0",
     lifespan=lifespan,

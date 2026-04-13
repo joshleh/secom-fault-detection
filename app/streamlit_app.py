@@ -1,8 +1,12 @@
 """
 Semiconductor Yield Debug Dashboard
 
-Interactive diagnostic tool for inspecting wafer samples, understanding
-model predictions, and investigating potential failure root causes.
+Interactive tool for inspecting individual wafers from a manufacturing
+dataset. For each wafer, the dashboard shows:
+  - pass/fail prediction from a trained Random Forest model
+  - which sensors influenced the prediction most (SHAP)
+  - how the wafer's readings compare to "normal" (passing) wafers
+  - a plain-English diagnostic summary
 
 Run:  streamlit run app/streamlit_app.py
 """
@@ -73,8 +77,10 @@ def main():
     # ── Header ────────────────────────────────────────────
     st.title("Semiconductor Yield Debug Dashboard")
     st.markdown(
-        "Inspect wafer samples, understand model-driven pass/fail predictions, "
-        "and investigate sensor-level root causes against the healthy production baseline."
+        "Each row in this dataset represents one semiconductor wafer tested on a production line. "
+        "Hundreds of sensors monitor the manufacturing process — this tool uses a trained ML model "
+        "to predict whether a wafer will pass or fail quality inspection, and then explains "
+        "**which sensors contributed most** to that prediction and **how far they deviate from normal**."
     )
 
     try:
@@ -119,7 +125,7 @@ def main():
         actual_label = pipeline.get_label(sample_idx)
         actual_label_str = "FAIL" if actual_label == 1 else "PASS"
 
-        st.sidebar.markdown(f"**Actual label:** {actual_label_str}")
+        st.sidebar.markdown(f"**Actual outcome:** {actual_label_str}")
     else:
         st.sidebar.markdown("Start from a base sample, then override sensor values below.")
         sample_idx = st.sidebar.number_input(
@@ -165,21 +171,26 @@ def main():
         pred_color = "🔴" if diag.prediction == "FAIL" else "🟢"
         st.metric("Prediction", f"{pred_color} {diag.prediction}")
     with col2:
-        st.metric("Failure Probability", f"{diag.probability:.1%}")
+        st.metric("Failure Probability", f"{diag.probability:.1%}",
+                  help="Model's estimated chance this wafer fails quality inspection")
     with col3:
-        st.metric("Actual Label", actual_label_str)
+        st.metric("Actual Outcome", actual_label_str,
+                  help="Ground truth: did this wafer actually pass or fail?")
     with col4:
         match = "✓ Correct" if (
             (diag.prediction == "FAIL" and actual_label == 1) or
             (diag.prediction == "PASS" and actual_label == 0)
         ) else "✗ Mismatch"
-        st.metric("Model vs Actual", match)
+        st.metric("Model vs Actual", match,
+                  help="Did the model's prediction agree with the real outcome?")
 
     # ── Panel 2: Top Sensor Drivers (SHAP) ──
     st.header("Top Sensor Drivers")
     st.markdown(
-        "SHAP values show each sensor's contribution to the failure prediction. "
-        "Positive values push toward FAIL; negative toward PASS."
+        "Each bar shows how much a single sensor influenced the model's prediction for this sample. "
+        "This uses [SHAP](https://shap.readthedocs.io/) (SHapley Additive exPlanations), a method "
+        "that breaks down a prediction into per-feature contributions. "
+        "**Red bars** push toward FAIL; **blue bars** push toward PASS."
     )
 
     top_features = diag.top_shap_features[:top_k]
@@ -197,8 +208,8 @@ def main():
         textfont=dict(color="#E0E0E0"),
     ))
     fig_shap.update_layout(
-        xaxis_title="SHAP Value (impact on failure prediction)",
-        yaxis_title="Sensor",
+        xaxis_title="SHAP Value (contribution to failure prediction)",
+        yaxis_title="Sensor (anonymized ID)",
         height=max(300, top_k * 35),
         margin=dict(l=20, r=20, t=10, b=40),
         **PLOTLY_LAYOUT,
@@ -208,9 +219,11 @@ def main():
     # ── Panel 3: Deviation from Healthy Baseline ──
     st.header("Deviation from Healthy Baseline")
     st.markdown(
-        f"Z-scores measure how far this sample's sensor readings deviate from the "
-        f"healthy production baseline (computed from {pipeline.baseline.n_samples} "
-        f"pass-only samples). Values beyond ±2σ are flagged."
+        f"The \"baseline\" is the average sensor behavior across **{pipeline.baseline.n_samples} wafers "
+        f"that passed** quality inspection — this represents what normal production looks like. "
+        f"The Z-score measures how many standard deviations this sample's reading is from that "
+        f"normal average. A Z-score beyond **±2** means the sensor reading is unusually high or low "
+        f"compared to healthy wafers (highlighted in the table)."
     )
 
     comparison_df = pipeline.get_baseline_comparison_df(diag, features=top_features)
@@ -234,8 +247,8 @@ def main():
         fig_dev.add_vline(x=-2, line_dash="dash", line_color="#666", opacity=0.7)
         fig_dev.add_vline(x=2, line_dash="dash", line_color="#666", opacity=0.7)
         fig_dev.update_layout(
-            xaxis_title="Z-Score (σ from baseline mean)",
-            yaxis_title="Sensor",
+            xaxis_title="Z-Score (standard deviations from normal)",
+            yaxis_title="Sensor (anonymized ID)",
             height=max(300, top_k * 35),
             margin=dict(l=20, r=20, t=10, b=40),
             **PLOTLY_LAYOUT,
@@ -256,7 +269,11 @@ def main():
 
     # ── Panel 4: Sample vs Baseline Overlay ──
     st.header("Sample vs Baseline Comparison")
-    st.markdown("Direct comparison of this sample's values against the healthy population range.")
+    st.markdown(
+        "Blue bars show the normal range (mean ± 1 standard deviation) for each sensor across "
+        "passing wafers. Red diamonds show this sample's actual values. When a diamond falls "
+        "far outside the blue bar, that sensor is behaving abnormally for this wafer."
+    )
 
     overlay_features = top_features[:min(10, len(top_features))]
     sample_vals = [float(diag.feature_values[f]) for f in overlay_features]
@@ -265,7 +282,7 @@ def main():
 
     fig_overlay = go.Figure()
     fig_overlay.add_trace(go.Bar(
-        name="Baseline Mean ± 1σ",
+        name="Normal Range (passing wafers)",
         x=overlay_features,
         y=baseline_means,
         error_y=dict(type="data", array=baseline_stds, visible=True,
@@ -274,7 +291,7 @@ def main():
         opacity=0.6,
     ))
     fig_overlay.add_trace(go.Scatter(
-        name="This Sample",
+        name="This Wafer",
         x=overlay_features,
         y=sample_vals,
         mode="markers+lines",
@@ -282,8 +299,8 @@ def main():
         line=dict(color=COLORS["sample_marker"], width=2),
     ))
     fig_overlay.update_layout(
-        yaxis_title="Scaled Sensor Value",
-        xaxis_title="Sensor",
+        yaxis_title="Sensor Reading (scaled)",
+        xaxis_title="Sensor (anonymized ID)",
         barmode="group",
         height=400,
         margin=dict(l=20, r=20, t=10, b=40),
@@ -294,12 +311,17 @@ def main():
 
     # ── Panel 5: Preliminary Failure Pattern Summary ──
     st.header("Preliminary Failure Pattern Summary")
+    st.markdown(
+        "*This summary is generated automatically from the model output and deviation data above — "
+        "not by an LLM. It combines which sensors the model relied on most with which sensors "
+        "deviate furthest from normal to suggest where to investigate.*"
+    )
 
     summary_text = generate_root_cause_summary(diag, pipeline.baseline, top_k=5)
     st.markdown(summary_text)
 
     # ── Panel 6: Raw Feature Inspector ──
-    with st.expander("Raw Feature Inspector (all 50 model features)"):
+    with st.expander("Full Feature Table (all 50 sensors used by the model)"):
         full_df = pd.DataFrame({
             "Sensor": diag.feature_values.index,
             "Value": diag.feature_values.values.round(4),
@@ -313,12 +335,13 @@ def main():
 
     # ── Sidebar: Pipeline info ────────────────────────────
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Pipeline Info")
+    st.sidebar.subheader("Dataset & Model Info")
+    fail_rate = len(pipeline.fail_indices) / pipeline.n_samples * 100
     st.sidebar.markdown(f"""
-    - **Dataset:** {pipeline.n_samples} samples
-    - **Pass samples:** {len(pipeline.pass_indices)}
-    - **Fail samples:** {len(pipeline.fail_indices)}
-    - **Model features:** {len(pipeline.mi_selected_cols)}
+    - **Total wafers:** {pipeline.n_samples}
+    - **Passed:** {len(pipeline.pass_indices)} ({100 - fail_rate:.1f}%)
+    - **Failed:** {len(pipeline.fail_indices)} ({fail_rate:.1f}%)
+    - **Sensors used by model:** {len(pipeline.mi_selected_cols)} (selected from 590 original)
     - **Model:** Random Forest ({pipeline.model.n_estimators} trees)
     """)
 
