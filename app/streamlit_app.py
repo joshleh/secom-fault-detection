@@ -1,5 +1,5 @@
 """
-Semiconductor Yield Debug Dashboard
+Semiconductor Yield Fault Detection
 
 Interactive tool for inspecting individual wafers from a manufacturing
 dataset. For each wafer, the dashboard shows:
@@ -26,7 +26,7 @@ from src.diagnostics import DiagnosticsPipeline, generate_root_cause_summary
 # ─── Page config ──────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Yield Debug Dashboard",
+    page_title="Yield Fault Detection",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -75,13 +75,31 @@ def load_pipeline():
 
 def main():
     # ── Header ────────────────────────────────────────────
-    st.title("Semiconductor Yield Debug Dashboard")
+    st.title("Semiconductor Yield Fault Detection")
     st.markdown(
         "Each row in this dataset represents one semiconductor wafer tested on a production line. "
         "Hundreds of sensors monitor the manufacturing process — this tool uses a trained ML model "
         "to predict whether a wafer will pass or fail quality inspection, and then explains "
         "**which sensors contributed most** to that prediction and **how far they deviate from normal**."
     )
+
+    with st.expander("About this project & dataset"):
+        st.markdown(
+            "This dashboard is built on the [SECOM dataset](https://archive.ics.uci.edu/dataset/179/secom) "
+            "from the UCI Machine Learning Repository. The data was collected from a real semiconductor "
+            "manufacturing line — each of the 1,567 wafers has 590 sensor readings captured during "
+            "production, along with a pass/fail quality label. The sensor names are anonymized to "
+            "protect proprietary process details, so they appear as numeric IDs (e.g. Feature 1, "
+            "Feature 155) rather than physical sensor names.\n\n"
+            "Only ~6.6% of wafers in the dataset failed inspection, making this a heavily imbalanced "
+            "classification problem. The ML pipeline behind this dashboard reduces the 590 raw sensors "
+            "down to the 50 most informative features using variance filtering, correlation pruning, "
+            "and mutual information ranking, then trains a class-weighted Random Forest to handle "
+            "the imbalance.\n\n"
+            "For the full training pipeline, model comparison (Isolation Forest, Random Forest, "
+            "LSTM Autoencoder), SHAP analysis notebooks, and FastAPI inference endpoint, see the "
+            "[GitHub repository](https://github.com/joshleh/secom-fault-detection)."
+        )
 
     try:
         pipeline = load_pipeline()
