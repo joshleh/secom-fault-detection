@@ -28,6 +28,24 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ─── Dark-mode Plotly template ────────────────────────────
+
+PLOTLY_LAYOUT = dict(
+    template="plotly_dark",
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="sans-serif", color="#E0E0E0"),
+)
+
+COLORS = {
+    "fail": "#EF5350",
+    "pass": "#4FC3F7",
+    "warn": "#FFA726",
+    "ok": "#66BB6A",
+    "bar_baseline": "#4FC3F7",
+    "sample_marker": "#EF5350",
+}
+
 # ─── Pipeline loading (cached) ───────────────────────────
 
 @st.cache_resource
@@ -167,7 +185,7 @@ def main():
     top_features = diag.top_shap_features[:top_k]
     top_shap_vals = [float(diag.shap_values[f]) for f in top_features]
 
-    colors = ["#d32f2f" if v > 0 else "#1976d2" for v in top_shap_vals]
+    colors = [COLORS["fail"] if v > 0 else COLORS["pass"] for v in top_shap_vals]
 
     fig_shap = go.Figure(go.Bar(
         x=top_shap_vals[::-1],
@@ -176,12 +194,14 @@ def main():
         marker_color=colors[::-1],
         text=[f"{v:+.4f}" for v in top_shap_vals[::-1]],
         textposition="auto",
+        textfont=dict(color="#E0E0E0"),
     ))
     fig_shap.update_layout(
         xaxis_title="SHAP Value (impact on failure prediction)",
         yaxis_title="Sensor",
         height=max(300, top_k * 35),
         margin=dict(l=20, r=20, t=10, b=40),
+        **PLOTLY_LAYOUT,
     )
     st.plotly_chart(fig_shap, use_container_width=True)
 
@@ -199,8 +219,8 @@ def main():
 
     with col_chart:
         z_vals = comparison_df["Z-Score"].values
-        z_colors = ["#d32f2f" if abs(z) > 2 else "#ff9800" if abs(z) > 1 else "#4caf50"
-                     for z in z_vals]
+        z_colors = [COLORS["fail"] if abs(z) > 2 else COLORS["warn"] if abs(z) > 1
+                     else COLORS["ok"] for z in z_vals]
 
         fig_dev = go.Figure(go.Bar(
             x=z_vals,
@@ -209,14 +229,16 @@ def main():
             marker_color=z_colors,
             text=[f"{z:+.1f}σ" for z in z_vals],
             textposition="auto",
+            textfont=dict(color="#E0E0E0"),
         ))
-        fig_dev.add_vline(x=-2, line_dash="dash", line_color="gray", opacity=0.5)
-        fig_dev.add_vline(x=2, line_dash="dash", line_color="gray", opacity=0.5)
+        fig_dev.add_vline(x=-2, line_dash="dash", line_color="#666", opacity=0.7)
+        fig_dev.add_vline(x=2, line_dash="dash", line_color="#666", opacity=0.7)
         fig_dev.update_layout(
             xaxis_title="Z-Score (σ from baseline mean)",
             yaxis_title="Sensor",
             height=max(300, top_k * 35),
             margin=dict(l=20, r=20, t=10, b=40),
+            **PLOTLY_LAYOUT,
         )
         st.plotly_chart(fig_dev, use_container_width=True)
 
@@ -224,9 +246,9 @@ def main():
         def highlight_deviation(row):
             z = abs(row["Z-Score"])
             if z > 3:
-                return ["background-color: #ffcdd2"] * len(row)
+                return ["background-color: #5c1a1a; color: #ff8a80"] * len(row)
             elif z > 2:
-                return ["background-color: #ffe0b2"] * len(row)
+                return ["background-color: #4a3000; color: #ffcc80"] * len(row)
             return [""] * len(row)
 
         styled = comparison_df.style.apply(highlight_deviation, axis=1)
@@ -246,17 +268,18 @@ def main():
         name="Baseline Mean ± 1σ",
         x=overlay_features,
         y=baseline_means,
-        error_y=dict(type="data", array=baseline_stds, visible=True),
-        marker_color="#90caf9",
-        opacity=0.7,
+        error_y=dict(type="data", array=baseline_stds, visible=True,
+                     color="#78909C"),
+        marker_color=COLORS["bar_baseline"],
+        opacity=0.6,
     ))
     fig_overlay.add_trace(go.Scatter(
         name="This Sample",
         x=overlay_features,
         y=sample_vals,
         mode="markers+lines",
-        marker=dict(size=10, color="#d32f2f", symbol="diamond"),
-        line=dict(color="#d32f2f", width=2),
+        marker=dict(size=10, color=COLORS["sample_marker"], symbol="diamond"),
+        line=dict(color=COLORS["sample_marker"], width=2),
     ))
     fig_overlay.update_layout(
         yaxis_title="Scaled Sensor Value",
@@ -265,6 +288,7 @@ def main():
         height=400,
         margin=dict(l=20, r=20, t=10, b=40),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        **PLOTLY_LAYOUT,
     )
     st.plotly_chart(fig_overlay, use_container_width=True)
 
