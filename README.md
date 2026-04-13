@@ -28,10 +28,7 @@ and a **Jupyter notebook** for deeper batch analysis.
 
 ## Dashboard
 
-<a href="docs/dashboard_screenshot.png">
-  <img src="docs/dashboard_screenshot.png" alt="Dashboard Screenshot" width="100%">
-</a>
-<sub>Click to view full size</sub>
+![Dashboard Screenshot](docs/dashboard_screenshot.png)
 
 The dashboard lets you select any wafer and instantly see:
 
