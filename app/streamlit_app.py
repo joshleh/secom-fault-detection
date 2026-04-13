@@ -114,8 +114,8 @@ def main():
     # ── Sidebar: Sample selection ─────────────────────────
     st.sidebar.header("Select a Wafer")
     st.sidebar.caption(
-        "Each row in the dataset is one wafer from the production line. "
-        "Pick a wafer by its row number, or filter to only see wafers that passed or failed."
+        "Each wafer in the dataset came from the production line. "
+        "Pick a wafer by its number, or filter to only see wafers that passed or failed."
     )
 
     mode = st.sidebar.radio(
@@ -141,7 +141,8 @@ def main():
             f"Wafer # ({len(valid_indices)} available)",
             valid_indices,
             index=0,
-            help="Row number in the dataset — each number is a different wafer",
+            format_func=lambda x: x + 1,
+            help="Each number corresponds to a different wafer in the dataset",
         )
 
         raw_features = pipeline.get_sample(sample_idx)
@@ -151,10 +152,11 @@ def main():
         st.sidebar.markdown(f"**Actual outcome:** {actual_label_str}")
     else:
         st.sidebar.markdown("Start from a base wafer, then tweak sensor values below to see how the prediction changes.")
-        sample_idx = st.sidebar.number_input(
-            "Base wafer #", min_value=0, max_value=pipeline.n_samples - 1, value=0,
-            help="Row number of the wafer to start from",
+        wafer_num = st.sidebar.number_input(
+            "Base wafer #", min_value=1, max_value=pipeline.n_samples, value=1,
+            help="Select a wafer to start from",
         )
+        sample_idx = wafer_num - 1
         raw_features = pipeline.get_sample(sample_idx).copy()
         actual_label = pipeline.get_label(sample_idx)
         actual_label_str = "FAIL" if actual_label == 1 else "PASS"
