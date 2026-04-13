@@ -16,8 +16,14 @@ build/
 .vscode/
 .idea/
  
-# ── Project-specific ──
-data/
-models/
+# ── Project-specific (generated at runtime) ──
+/data/
+/models/
 mlruns/
 outputs/
+
+# ── Committed assets for dashboard demo ──
+# dashboard_assets/ is intentionally tracked — it contains a snapshot
+# of the processed data (~4.8 MB) and trained model (~1.3 MB) so the
+# Streamlit dashboard works immediately after cloning without running
+# notebooks or training scripts first.
