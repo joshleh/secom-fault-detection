@@ -28,7 +28,7 @@ and a **Jupyter notebook** for deeper batch analysis.
 
 ## Dashboard
 
-![Dashboard Screenshot](docs/dashboard_screenshot.png?v=2)
+![Dashboard Screenshot](docs/dashboard_screenshot.png?v=3)
 
 The dashboard lets you select any wafer and instantly see:
 
