@@ -28,6 +28,8 @@ and a **Jupyter notebook** for deeper batch analysis.
 
 ## Dashboard
 
+![Dashboard Screenshot](docs/dashboard_screenshot.png)
+
 The dashboard lets you select any wafer and instantly see:
 
 - **Diagnostic Overview** — pass/fail prediction with the model's confidence

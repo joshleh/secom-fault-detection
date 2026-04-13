@@ -94,31 +94,36 @@ def main():
         return
 
     # ── Sidebar: Sample selection ─────────────────────────
-    st.sidebar.header("Sample Selection")
+    st.sidebar.header("Select a Wafer")
+    st.sidebar.caption(
+        "Each row in the dataset is one wafer from the production line. "
+        "Pick a wafer by its row number, or filter to only see wafers that passed or failed."
+    )
 
     mode = st.sidebar.radio(
         "Input mode",
-        ["Select by index", "Manual sensor override"],
+        ["Pick a wafer", "Manual sensor override"],
         index=0,
     )
 
-    if mode == "Select by index":
+    if mode == "Pick a wafer":
         filter_type = st.sidebar.selectbox(
-            "Filter samples",
-            ["All samples", "Fail only", "Pass only"],
+            "Show",
+            ["All wafers", "Failed wafers only", "Passed wafers only"],
         )
 
-        if filter_type == "Fail only":
+        if filter_type == "Failed wafers only":
             valid_indices = pipeline.fail_indices
-        elif filter_type == "Pass only":
+        elif filter_type == "Passed wafers only":
             valid_indices = pipeline.pass_indices
         else:
             valid_indices = list(range(pipeline.n_samples))
 
         sample_idx = st.sidebar.selectbox(
-            f"Sample index ({len(valid_indices)} available)",
+            f"Wafer # ({len(valid_indices)} available)",
             valid_indices,
             index=0,
+            help="Row number in the dataset — each number is a different wafer",
         )
 
         raw_features = pipeline.get_sample(sample_idx)
@@ -127,9 +132,10 @@ def main():
 
         st.sidebar.markdown(f"**Actual outcome:** {actual_label_str}")
     else:
-        st.sidebar.markdown("Start from a base sample, then override sensor values below.")
+        st.sidebar.markdown("Start from a base wafer, then tweak sensor values below to see how the prediction changes.")
         sample_idx = st.sidebar.number_input(
-            "Base sample index", min_value=0, max_value=pipeline.n_samples - 1, value=0
+            "Base wafer #", min_value=0, max_value=pipeline.n_samples - 1, value=0,
+            help="Row number of the wafer to start from",
         )
         raw_features = pipeline.get_sample(sample_idx).copy()
         actual_label = pipeline.get_label(sample_idx)
@@ -162,8 +168,8 @@ def main():
 
     # ── Layout: Main panels ──────────────────────────────
 
-    # ── Panel 1: Sample Diagnostic Overview ──
-    st.header("Sample Diagnostic Overview")
+    # ── Panel 1: Wafer Diagnostic Overview ──
+    st.header("Wafer Diagnostic Overview")
 
     col1, col2, col3, col4 = st.columns(4)
 
