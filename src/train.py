@@ -45,7 +45,7 @@ def train_and_save(data_dir: str = "data/processed") -> None:
     # ── Step 1: Load EDA-cleaned data ──
     X_clean, y = load_clean(data_dir)
     input_feature_names = X_clean.columns.tolist()
-    print(f"Loaded {X_clean.shape[0]} samples × {X_clean.shape[1]} features  |  "
+    print(f"Loaded {X_clean.shape[0]} samples x {X_clean.shape[1]} features  |  "
           f"Fail rate: {y.mean():.1%}")
 
     # ── Step 2: Variance filter + StandardScaler ──
@@ -85,7 +85,7 @@ def train_and_save(data_dir: str = "data/processed") -> None:
     y_pred = rf.predict(X_test)
     y_prob = rf.predict_proba(X_test)[:, 1]
 
-    print("\n── Test Set Performance ──")
+    print("\n-- Test Set Performance --")
     print(classification_report(y_test, y_pred, target_names=["Pass", "Fail"]))
     print(f"ROC-AUC: {roc_auc_score(y_test, y_prob):.4f}")
 
@@ -113,10 +113,10 @@ def train_and_save(data_dir: str = "data/processed") -> None:
         json.dump(input_feature_names, f)
 
     print(f"\nAll artifacts saved to {MODEL_DIR}/")
-    print(f"  preprocessing/       → var_selector.joblib, scaler.joblib")
-    print(f"  feature_engineering/ → corr_kept_cols.json ({len(corr_kept_cols)} cols), "
+    print("  preprocessing/        -> var_selector.joblib, scaler.joblib")
+    print(f"  feature_engineering/ -> corr_kept_cols.json ({len(corr_kept_cols)} cols), "
           f"mi_selected_cols.json ({len(mi_selected_cols)} cols)")
-    print(f"  rf_model.joblib      → {rf.n_estimators} trees, depth={rf.max_depth}")
+    print(f"  rf_model.joblib       -> {rf.n_estimators} trees, depth={rf.max_depth}")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ joblib==1.4.2
 # ── Visualization ──
 matplotlib==3.9.2
 seaborn==0.13.2
+plotly==5.24.1
 
 # ── Modeling ──
 shap==0.46.0
@@ -16,6 +17,9 @@ mlflow==2.16.2
 # ── API ──
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+
+# ── Dashboard ──
+streamlit==1.39.0
 
 # ── Notebooks ──
 jupyter==1.1.1
