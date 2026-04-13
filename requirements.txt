@@ -1,25 +1,8 @@
-# ── Core ──
+# ── Runtime dependencies (used by Streamlit Cloud + dashboard) ──
 numpy==1.26.4
 pandas==2.2.3
 scikit-learn==1.5.2
 joblib==1.4.2
-
-# ── Visualization ──
-matplotlib==3.9.2
-seaborn==0.13.2
 plotly==5.24.1
-
-# ── Modeling ──
 shap==0.46.0
-torch==2.4.1
-mlflow==2.16.2
-
-# ── API ──
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-
-# ── Dashboard ──
 streamlit==1.39.0
-
-# ── Notebooks ──
-jupyter==1.1.1

@@ -1,0 +1,19 @@
+# ── Full development dependencies ──
+# Install with:  pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+# ── Modeling (training only) ──
+torch==2.4.1
+mlflow==2.16.2
+
+# ── Visualization (notebooks) ──
+matplotlib==3.9.2
+seaborn==0.13.2
+
+# ── API ──
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# ── Notebooks ──
+jupyter==1.1.1
