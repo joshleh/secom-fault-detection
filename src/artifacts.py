@@ -37,6 +37,7 @@ class PipelineArtifacts:
     mi_selected_cols: list[str]
     input_feature_names: list[str]
     model: Any
+    threshold: float = 0.5  # tuned at training time; defaults to 0.5 if absent
 
     @property
     def preprocess_artifacts(self) -> dict:
@@ -73,13 +74,25 @@ def load_pipeline_artifacts(model_dir: str) -> PipelineArtifacts:
 
     model = joblib.load(os.path.join(model_dir, "rf_model.joblib"))
 
+    threshold_path = os.path.join(model_dir, "threshold.json")
+    if os.path.exists(threshold_path):
+        with open(threshold_path) as f:
+            threshold = float(json.load(f).get("threshold", 0.5))
+    else:
+        threshold = 0.5
+
+    n_estimators = getattr(model, "n_estimators", None)
+    if n_estimators is None and hasattr(model, "estimator"):
+        n_estimators = getattr(model.estimator, "n_estimators", "?")
+
     logger.info(
-        "Loaded pipeline from %s: %d input feats -> %d after corr -> %d MI -> RF (%s trees)",
+        "Loaded pipeline from %s: %d input feats -> %d after corr -> %d MI -> RF (%s trees), threshold=%.3f",
         model_dir,
         len(input_feature_names),
         len(corr_kept_cols),
         len(mi_selected_cols),
-        getattr(model, "n_estimators", "?"),
+        n_estimators if n_estimators is not None else "?",
+        threshold,
     )
 
     return PipelineArtifacts(
@@ -89,4 +102,5 @@ def load_pipeline_artifacts(model_dir: str) -> PipelineArtifacts:
         mi_selected_cols=mi_selected_cols,
         input_feature_names=input_feature_names,
         model=model,
+        threshold=threshold,
     )

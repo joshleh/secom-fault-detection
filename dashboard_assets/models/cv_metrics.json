@@ -1,0 +1,9 @@
+{
+  "n_splits": 5,
+  "roc_auc_mean": 0.7467,
+  "roc_auc_std": 0.0445,
+  "pr_auc_mean": 0.215,
+  "pr_auc_std": 0.0338,
+  "fail_f1_mean": 0.0704,
+  "fail_f1_std": 0.0653
+}

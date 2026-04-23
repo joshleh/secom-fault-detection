@@ -71,6 +71,7 @@ class DiagnosticsPipeline:
         self.input_feature_names = []
         self.corr_kept_cols = []
         self.mi_selected_cols = []
+        self.threshold: float = 0.5
         self.baseline: BaselineProfile | None = None
         self._X_clean = None
         self._y = None
@@ -83,6 +84,7 @@ class DiagnosticsPipeline:
         self.mi_selected_cols = artifacts.mi_selected_cols
         self.input_feature_names = artifacts.input_feature_names
         self.model = artifacts.model
+        self.threshold = artifacts.threshold
         self.explainer = shap.TreeExplainer(self.model)
 
         self._X_clean, self._y = load_clean(self.data_dir)
@@ -155,7 +157,7 @@ class DiagnosticsPipeline:
         X_selected = self._transform(X_raw)
 
         prob_fail = float(self.model.predict_proba(X_selected)[0, 1])
-        label = "FAIL" if prob_fail >= 0.5 else "PASS"
+        label = "FAIL" if prob_fail >= self.threshold else "PASS"
 
         shap_raw = self.explainer.shap_values(X_selected)
         if isinstance(shap_raw, list):

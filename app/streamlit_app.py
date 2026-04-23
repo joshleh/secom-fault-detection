@@ -362,12 +362,14 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("Dataset & Model Info")
     fail_rate = len(pipeline.fail_indices) / pipeline.n_samples * 100
+    n_estimators = getattr(pipeline.model, "n_estimators", "?")
     st.sidebar.markdown(f"""
     - **Total wafers:** {pipeline.n_samples}
     - **Passed:** {len(pipeline.pass_indices)} ({100 - fail_rate:.1f}%)
     - **Failed:** {len(pipeline.fail_indices)} ({fail_rate:.1f}%)
     - **Sensors used by model:** {len(pipeline.mi_selected_cols)} (selected from 590 original)
-    - **Model:** Random Forest ({pipeline.model.n_estimators} trees)
+    - **Model:** Random Forest ({n_estimators} trees)
+    - **Decision threshold:** {pipeline.threshold:.3f}
     """)
 
 

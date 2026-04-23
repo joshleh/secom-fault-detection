@@ -1,0 +1,9 @@
+{
+  "threshold": 0.22241703016025968,
+  "precision": 0.23333333333333334,
+  "recall": 0.6666666666666666,
+  "f1": 0.34567901234529497,
+  "objective": "f1",
+  "min_recall": null,
+  "n_candidates": 314
+}

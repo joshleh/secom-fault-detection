@@ -36,13 +36,15 @@ input_feature_names: list[str] = []
 corr_kept_cols: list[str] = []
 mi_selected_cols: list[str] = []
 N_INPUT_FEATURES: int = 0
+THRESHOLD: float = 0.5
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load all pipeline artifacts on startup."""
     global model, explainer, preprocess_artifacts
-    global input_feature_names, corr_kept_cols, mi_selected_cols, N_INPUT_FEATURES
+    global input_feature_names, corr_kept_cols, mi_selected_cols
+    global N_INPUT_FEATURES, THRESHOLD
 
     artifacts = load_pipeline_artifacts(MODEL_DIR)
     preprocess_artifacts = artifacts.preprocess_artifacts
@@ -51,6 +53,7 @@ async def lifespan(app: FastAPI):
     input_feature_names = artifacts.input_feature_names
     N_INPUT_FEATURES = len(input_feature_names)
     model = artifacts.model
+    THRESHOLD = artifacts.threshold
     explainer = shap.TreeExplainer(model)
 
     yield
@@ -134,7 +137,8 @@ def health():
             "input_features": N_INPUT_FEATURES,
             "after_corr_filter": len(corr_kept_cols),
             "after_mi_select": len(mi_selected_cols),
-            "model_trees": model.n_estimators if model else 0,
+            "model_trees": getattr(model, "n_estimators", 0) if model else 0,
+            "decision_threshold": round(THRESHOLD, 4),
         },
     }
 
@@ -152,9 +156,9 @@ def predict(req: PredictRequest):
     # ── Transform through the full pipeline ──
     x = transform_input(req.features)
 
-    # ── Predict ──
+    # ── Predict (using tuned decision threshold) ──
     prob_fail = float(model.predict_proba(x)[0, 1])
-    label = "FAIL" if prob_fail >= 0.5 else "PASS"
+    label = "FAIL" if prob_fail >= THRESHOLD else "PASS"
 
     # ── SHAP (class-1 = Fail) ──
     shap_values = explainer.shap_values(x)

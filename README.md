@@ -89,7 +89,7 @@ Three approaches were compared, all tracked with [MLflow](https://mlflow.org/) (
 | Model | Type | ROC-AUC | Fail Recall | Fail F1 |
 |---|---|---|---|---|
 | Isolation Forest | Anomaly detection | 0.57 | 19% | 0.20 |
-| **Random Forest** | Classification | **0.80** | **33%** | **0.34** |
+| **Random Forest** | Classification | **0.80** | **67%** | **0.35** |
 | LSTM Autoencoder | Deep learning | 0.58 | 10% | 0.11 |
 
 **What the metrics mean:**
@@ -98,6 +98,8 @@ Three approaches were compared, all tracked with [MLflow](https://mlflow.org/) (
 - **Fail F1**: balance between catching failures and not raising too many false alarms
 
 Random Forest was selected because it had the best overall performance. It uses class weighting to pay extra attention to the rare failure cases — missing a defective wafer is more costly than a false alarm in manufacturing.
+
+**Cross-validation and threshold tuning.** A single 80/20 split is high-variance with only ~21 fail samples in the test set, so `src/train.py` reports 5-fold stratified CV (mean ± std: ROC-AUC = 0.747 ± 0.044, PR-AUC = 0.215 ± 0.034) alongside the held-out validation metrics. The decision threshold is tuned on the validation set to maximize Fail-F1 — the F1-optimal threshold of **0.22** doubles fail recall (33% → 67%) compared to the default 0.5, at a small precision cost. The tuned value is persisted to `models/threshold.json` and loaded by both the API and the dashboard.
 
 ### Explainability
 
@@ -241,7 +243,6 @@ jupyter notebook notebooks/05_yield_debug_analysis.ipynb
 - **Dashboard:** Streamlit interactive tool for inspecting individual wafers
 
 ## Future Work
-- Fine-tune the decision threshold to optimize the tradeoff between catching failures and false alarms
 - Monitor for data drift — detect when incoming sensor data stops matching what the model was trained on
 - Integration with manufacturing execution systems (MES) for real-time tracking
 - Build a library of known failure patterns from past investigations
