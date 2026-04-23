@@ -23,13 +23,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install runtime + dev dependencies (no torch)
-        # Skip torch — heavy CPU-only wheel that we don't need to run tests
-        # against the dashboard snapshot. Everything else from requirements-dev.
+      - name: Install runtime + dev dependencies (no torch / mlflow)
+        # Skip torch and mlflow — heavy wheels we don't need to run tests
+        # against the dashboard snapshot. Filter in-place so pip still
+        # resolves the nested "-r requirements.txt" reference correctly.
         run: |
           python -m pip install --upgrade pip
-          grep -v "^torch" requirements-dev.txt > /tmp/req-ci.txt
-          pip install -r /tmp/req-ci.txt
+          grep -vE "^(torch|mlflow)" requirements-dev.txt > requirements-ci.txt
+          pip install -r requirements-ci.txt
 
       - name: Lint with ruff
         run: ruff check .

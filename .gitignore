@@ -24,6 +24,7 @@ build/
 notebooks/data/
 mlruns/
 outputs/
+requirements-ci.txt
 
 # ── Committed assets for dashboard demo ──
 # dashboard_assets/ is intentionally tracked — it contains a snapshot
