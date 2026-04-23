@@ -5,16 +5,21 @@ Provides correlation-based feature selection, feature importance summaries,
 and utilities to handle the ~14:1 class imbalance (pass vs. fail).
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 from sklearn.feature_selection import mutual_info_classif
 from sklearn.utils.class_weight import compute_class_weight
 
+logger = logging.getLogger(__name__)
+
+
 def get_feature_stats(X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
     """
-    Compute summmary statistics for each features, including correlation with target.
+    Compute summary statistics for each feature, including correlation with target.
 
-    Returns a DataFrame index by feature naame with columns:
+    Returns a DataFrame indexed by feature name with columns:
         mean, std, missing_pct, abs_corr_with_target
     """
     stats =  pd.DataFrame(
@@ -43,7 +48,7 @@ def drop_highly_correlated(
     Parameters
     ----------
     X : pd.DataFrame — features (should already be imputed)
-    treshold : float — correlation cutoff (default 0.95)
+    threshold : float — correlation cutoff (default 0.95)
 
     Returns
     -------
@@ -56,9 +61,9 @@ def drop_highly_correlated(
     to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
     X_reduced = X.drop(columns=to_drop)
 
-    print(
-        f"Correlation filter (|r| > {threshold}): "
-        f"dropped {len(to_drop)} features, kept {X_reduced.shape[1]}"
+    logger.info(
+        "Correlation filter (|r| > %s): dropped %d features, kept %d",
+        threshold, len(to_drop), X_reduced.shape[1],
     )
     return X_reduced, to_drop
 
@@ -90,31 +95,31 @@ def select_top_k_by_mutual_info(
     top_features = mi_scores.head(k).index.tolist()
     X_selected = X[top_features]
 
-    print(f"MI selection: kept top {k} of {X.shape[1]} features.")
+    logger.info("MI selection: kept top %d of %d features.", k, X.shape[1])
     return X_selected, mi_scores
 
 def compute_balanced_weights(y: pd.Series) -> dict:
     """
-    Compute class weights inversely proportional to class frequency. 
-    
-    For SECOM with ~14:1 pass/fail imbalance, this gives fail samples 
-    ~14 more weight — equivalent to sklearn's class_weight='balanced'.
-    
+    Compute class weights inversely proportional to class frequency.
+
+    For SECOM with ~14:1 pass/fail imbalance, this gives fail samples
+    ~14x more weight — equivalent to sklearn's class_weight='balanced'.
+
     Returns
     --------
     weight_dict : dict — {0: weight_pass, 1: weight_fail}
     """
     classes = np.array(sorted(y.unique()))
-    weights = compute_class_weight("balanced", classes= classes, y=y)
+    weights = compute_class_weight("balanced", classes=classes, y=y)
     weight_dict = dict(zip(classes, weights))
 
-    print(f"Class weights: {weight_dict}")
+    logger.info("Class weights: %s", weight_dict)
     return weight_dict
 
 def get_imbalance_summary(y: pd.Series) -> pd.DataFrame:
     """
-    Print and return a summary of class distribution.
-    
+    Log and return a summary of class distribution.
+
     Returns
     --------
     summary : pd.DataFrame with columns [count, pct]
@@ -125,7 +130,6 @@ def get_imbalance_summary(y: pd.Series) -> pd.DataFrame:
     summary = pd.DataFrame({"count": counts, "pct": pcts.round(2)})
     summary.index = summary.index.map({0: "Pass (0)", 1: "Fail (1)"})
 
-    print("Class Distribution Summary:")
-    print(summary.to_string())
-    print(f"Imbalance Ratio: {counts[0] / counts[1]:.1f} : 1")
+    logger.info("Class Distribution Summary:\n%s", summary.to_string())
+    logger.info("Imbalance Ratio: %.1f : 1", counts[0] / counts[1])
     return summary

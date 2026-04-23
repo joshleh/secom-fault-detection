@@ -11,18 +11,17 @@ Endpoints:
   GET  /health   — liveness check with pipeline metadata
 """
 
-import json
 import os
 from contextlib import asynccontextmanager
 from typing import List
 
-import joblib
 import numpy as np
 import pandas as pd
 import shap
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, field_validator
 
+from src.artifacts import load_pipeline_artifacts
 from src.preprocess import run_preprocessing_pipeline
 
 # ─── Paths ───────────────────────────────────────────────
@@ -46,35 +45,15 @@ async def lifespan(app: FastAPI):
     global model, explainer, preprocess_artifacts
     global input_feature_names, corr_kept_cols, mi_selected_cols, N_INPUT_FEATURES
 
-    # ── Preprocessing (variance filter + scaler) ──
-    pp_dir = os.path.join(MODEL_DIR, "preprocessing")
-    preprocess_artifacts = {
-        "var_selector": joblib.load(os.path.join(pp_dir, "var_selector.joblib")),
-        "scaler": joblib.load(os.path.join(pp_dir, "scaler.joblib")),
-    }
-
-    # ── Feature engineering column lists ──
-    fe_dir = os.path.join(MODEL_DIR, "feature_engineering")
-    with open(os.path.join(fe_dir, "corr_kept_cols.json")) as f:
-        corr_kept_cols = json.load(f)
-    with open(os.path.join(fe_dir, "mi_selected_cols.json")) as f:
-        mi_selected_cols = json.load(f)
-
-    # ── Input feature names ──
-    with open(os.path.join(MODEL_DIR, "feature_names_input.json")) as f:
-        input_feature_names = json.load(f)
+    artifacts = load_pipeline_artifacts(MODEL_DIR)
+    preprocess_artifacts = artifacts.preprocess_artifacts
+    corr_kept_cols = artifacts.corr_kept_cols
+    mi_selected_cols = artifacts.mi_selected_cols
+    input_feature_names = artifacts.input_feature_names
     N_INPUT_FEATURES = len(input_feature_names)
-
-    # ── Model + SHAP explainer ──
-    model = joblib.load(os.path.join(MODEL_DIR, "rf_model.joblib"))
+    model = artifacts.model
     explainer = shap.TreeExplainer(model)
 
-    print(
-        f"✓ Pipeline loaded: {N_INPUT_FEATURES} input features → "
-        f"{len(corr_kept_cols)} after corr filter → "
-        f"{len(mi_selected_cols)} MI-selected → "
-        f"RF ({model.n_estimators} trees)"
-    )
     yield
 
 

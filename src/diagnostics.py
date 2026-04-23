@@ -15,16 +15,15 @@ Key classes:
   - generate_root_cause_summary(): builds a plain-English diagnostic summary
 """
 
-import json
 import os
 from dataclasses import dataclass
 from typing import List, Optional
 
-import joblib
 import numpy as np
 import pandas as pd
 import shap
 
+from src.artifacts import load_pipeline_artifacts
 from src.preprocess import load_clean, run_preprocessing_pipeline
 
 
@@ -81,22 +80,12 @@ class DiagnosticsPipeline:
 
     def load(self):
         """Load model artifacts and compute baseline from training data."""
-        pp_dir = os.path.join(self.model_dir, "preprocessing")
-        self.preprocess_artifacts = {
-            "var_selector": joblib.load(os.path.join(pp_dir, "var_selector.joblib")),
-            "scaler": joblib.load(os.path.join(pp_dir, "scaler.joblib")),
-        }
-
-        fe_dir = os.path.join(self.model_dir, "feature_engineering")
-        with open(os.path.join(fe_dir, "corr_kept_cols.json")) as f:
-            self.corr_kept_cols = json.load(f)
-        with open(os.path.join(fe_dir, "mi_selected_cols.json")) as f:
-            self.mi_selected_cols = json.load(f)
-
-        with open(os.path.join(self.model_dir, "feature_names_input.json")) as f:
-            self.input_feature_names = json.load(f)
-
-        self.model = joblib.load(os.path.join(self.model_dir, "rf_model.joblib"))
+        artifacts = load_pipeline_artifacts(self.model_dir)
+        self.preprocess_artifacts = artifacts.preprocess_artifacts
+        self.corr_kept_cols = artifacts.corr_kept_cols
+        self.mi_selected_cols = artifacts.mi_selected_cols
+        self.input_feature_names = artifacts.input_feature_names
+        self.model = artifacts.model
         self.explainer = shap.TreeExplainer(self.model)
 
         self._X_clean, self._y = load_clean(self.data_dir)

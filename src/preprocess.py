@@ -1,9 +1,9 @@
 """
-preprocess.py — Reusable preprocessing pipeline for SECOM semiconductor data. 
+preprocess.py — Reusable preprocessing pipeline for SECOM semiconductor data.
 
-Functions handle missing value imputation, low-variance feature removal, 
-and feature scaling. Designed to be imported by notebook and the FastAPI
-seving layer so the same transforms are used in training and inference. 
+Functions handle missing value imputation, low-variance feature removal,
+and feature scaling. Designed to be imported by notebooks and the FastAPI
+serving layer so the same transforms are used in training and inference.
 
 Data conventions (matching 01_eda.ipynb):
 - Raw Labels: 1 = pass, -1 = fail (UCI convention)
@@ -12,13 +12,17 @@ Data conventions (matching 01_eda.ipynb):
 - EDA already saves X_clean.csv (446 features, median-imputed, no >50%-missing cols)
 """
 
+import logging
+from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
+from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
-from sklearn.feature_selection import VarianceThreshold
-import joblib
-from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ==========================================================================
 # Data Loading
@@ -68,23 +72,31 @@ def load_clean(data_dir: str = "data/processed") -> tuple[pd.DataFrame, pd.Serie
 # Cleaning steps (mirrors EDA logic as reusable functions)
 # ==========================================================================
 
-def drop_high_missing(X: pd.DataFrame, threshold: float = 0.5) -> pd.DataFrame:
+def drop_high_missing(
+    X: pd.DataFrame, threshold: float = 0.5
+) -> tuple[pd.DataFrame, list[str]]:
     """
-    Drop features with missing faction above `threshold`.
-    
+    Drop features with missing fraction above `threshold`.
+
     EDA finding: 4 features have >50% missing values.
     """
     miss_frac = X.isnull().mean()
     to_drop = miss_frac[miss_frac > threshold].index.tolist()
     X_out = X.drop(columns=to_drop)
-    print(f"Dropped {len(to_drop)} features > {threshold*100:.0f}% missing. Remaining: {X_out.shape[1]}")
+    logger.info(
+        "Dropped %d features > %.0f%% missing. Remaining: %d",
+        len(to_drop), threshold * 100, X_out.shape[1],
+    )
     return X_out, to_drop
 
 def drop_zero_variance(X: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """Drop features with exactly zero standard deviation."""
     zero_var = X.columns[X.std() == 0].tolist()
     X_out = X.drop(columns=zero_var)
-    print(f"Dropped {len(zero_var)} zero-variance features. Reamining: {X_out.shape[1]}")
+    logger.info(
+        "Dropped %d zero-variance features. Remaining: %d",
+        len(zero_var), X_out.shape[1],
+    )
     return X_out, zero_var
 
 def impute_missing(
@@ -99,7 +111,7 @@ def impute_missing(
     Median is preferred over KNN for SECOM because:
     - 538/590 features have missing values — KNN neighbor distances
     are unreliable in such high-dimensional, sparse feature spaces
-    - Sensor distributions are heavy-tailed with outliters — median is
+    - Sensor distributions are heavy-tailed with outliers — median is
     more robust than mean
     - KNN imputation on 590 features is computationally expensive
     with marginal quality gains
@@ -132,8 +144,8 @@ def remove_low_variance(
     """
     Drop features with variance at or below `threshold`.
 
-    threshold=0.0 removes only constant features (safest default). 
-    After scaling, ~0.01 can catch near-constant features too. 
+    threshold=0.0 removes only constant features (safest default).
+    After scaling, ~0.01 can catch near-constant features too.
     """
     if fit:
         selector = VarianceThreshold(threshold=threshold)
@@ -152,18 +164,18 @@ def remove_low_variance(
         )
     
     n_dropped = X.shape[1] - X_out.shape[1]
-    print(f"Variance filter: dropped {n_dropped} features, kept {X_out.shape[1]}")
+    logger.info("Variance filter: dropped %d features, kept %d", n_dropped, X_out.shape[1])
     return X_out, selector
 
 def scale_features(
-        X: pd.DataFrame, 
+        X: pd.DataFrame,
         fit: bool = True,
         scaler: StandardScaler | None = None,
     ) -> tuple[pd.DataFrame, StandardScaler]:
     """
-    Stndardize features to zero mean and unit variance.
-    
-    StandardScalar is appropriate here because:
+    Standardize features to zero mean and unit variance.
+
+    StandardScaler is appropriate here because:
     - SECOM features have very different scales (found in EDA)
     - Logistic Regression and distance-based methods need scaled inputs
     - Tree models are scale-invariant but scaling doesn't hurt them
@@ -240,7 +252,7 @@ def save_artifacts(artifacts: dict, save_dir: str = "models/preprocessing") -> N
     save_path.mkdir(parents=True, exist_ok=True)
     for name, obj in artifacts.items():
         joblib.dump(obj, save_path / f"{name}.joblib")
-    print(f"Saved {len(artifacts)} preprocessing artifacts to {save_path}")
+    logger.info("Saved %d preprocessing artifacts to %s", len(artifacts), save_path)
 
 def load_artifacts(save_dir: str = "models/preprocessing") -> dict:
     """Load fitted preprocessing objects."""
@@ -248,5 +260,5 @@ def load_artifacts(save_dir: str = "models/preprocessing") -> dict:
     artifacts = {}
     for fpath in save_path.glob("*.joblib"):
         artifacts[fpath.stem] = joblib.load(fpath)
-    print(f"Loaded {len(artifacts)} preprocessing artifacts from {save_path}")
+    logger.info("Loaded %d preprocessing artifacts from %s", len(artifacts), save_path)
     return artifacts
