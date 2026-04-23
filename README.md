@@ -211,39 +211,43 @@ pip install -r requirements.txt
 streamlit run app/streamlit_app.py
 ```
 
+Or with the bundled `Makefile`:
+
+```bash
+make install   # runtime deps only
+make app       # streamlit dashboard
+```
+
 ### Full Pipeline (EDA → training → dashboard)
 
 To reproduce the full workflow from scratch:
 
-**1. Install dependencies:**
 ```bash
-pip install -r requirements-dev.txt
+make install-dev          # 1. install all deps
+make fetch-data           # 2. download SECOM (hash-verified) into data/raw/
+jupyter notebook notebooks/01_eda.ipynb   # 3. produces data/processed/
+make train                # 4. produces models/
+make snapshot             # 5. (optional) refresh dashboard_assets/ from models/
+make app                  # 6. launch dashboard
+make api                  # 7. (optional) launch FastAPI on :8000
 ```
 
-**2. Download data and run EDA** (generates `data/processed/`):
+### Docker
+
+A pre-built API image is wired up via `docker-compose.yml`:
+
 ```bash
-jupyter notebook notebooks/01_eda.ipynb
+make docker-up    # build + start the API on http://localhost:8000
+curl http://localhost:8000/health
+make docker-down
 ```
 
-**3. Train the model** (generates `models/`):
-```bash
-python src/train.py
-```
+The Dockerfile uses `dashboard_assets/models/` as the bundled model
+directory, so `docker build .` works on a fresh clone without needing
+to retrain.
 
-**4. Launch the dashboard:**
-```bash
-streamlit run app/streamlit_app.py
-```
-
-**5. (Optional) Start the API:**
-```bash
-uvicorn api.main:app --reload --port 8000
-```
-
-**6. (Optional) Run the yield debug analysis notebook:**
-```bash
-jupyter notebook notebooks/05_yield_debug_analysis.ipynb
-```
+For the full Random Forest model card (intended use, training data,
+metrics, and limitations), see [`MODEL_CARD.md`](MODEL_CARD.md).
 
 ## Technical Approach
 - **Preprocessing:** Fill missing values with medians, remove constant sensors, standardize scales
