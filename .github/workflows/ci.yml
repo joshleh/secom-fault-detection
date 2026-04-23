@@ -49,13 +49,25 @@ jobs:
 
       - name: Smoke test API container
         run: |
-          docker run --rm -d --name secom-api -p 8000:8000 secom-fault-detection:ci
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            sleep 3
-            if curl -fsS http://localhost:8000/health; then
-              echo "API healthy after $((i*3))s"
+          set -e
+          docker run -d --name secom-api -p 8000:8000 secom-fault-detection:ci
+          # Poll /health until it responds, then probe /metadata.
+          # Print container logs on any failure so future regressions are visible.
+          trap 'echo "--- container logs ---"; docker logs secom-api || true; docker rm -f secom-api || true' EXIT
+          ok=0
+          for i in $(seq 1 15); do
+            sleep 2
+            if curl -fsS http://localhost:8000/health > /dev/null; then
+              echo "API healthy after $((i*2))s"
+              ok=1
               break
             fi
           done
+          if [ "$ok" -ne 1 ]; then
+            echo "API never became healthy" >&2
+            exit 1
+          fi
+          curl -fsS http://localhost:8000/health
+          echo
           curl -fsS http://localhost:8000/metadata | head -c 300
-          docker stop secom-api
+          echo

@@ -200,8 +200,8 @@ This project uses two requirements files:
 
 | File | What it covers | When to use |
 |---|---|---|
-| `requirements.txt` | Dashboard + API runtime (numpy, pandas, scipy, scikit-learn, joblib, plotly, shap, streamlit) | Streamlit Cloud deploys from this automatically. Also sufficient if you only want to run the dashboard locally. |
-| `requirements-dev.txt` | Everything above **plus** torch, mlflow, fastapi, uvicorn, jupyter, matplotlib, seaborn, pytest, ruff, httpx | Local development — running notebooks, training models, serving the API, running tests. |
+| `requirements.txt` | Dashboard + API runtime (numpy, pandas, scipy, scikit-learn, joblib, plotly, shap, streamlit, fastapi, uvicorn) | Streamlit Cloud deploys from this automatically. Also what the Docker image installs to serve the API. Sufficient if you only want to run the dashboard or API locally. |
+| `requirements-dev.txt` | Everything above **plus** torch, mlflow, jupyter, matplotlib, seaborn, pytest, ruff, httpx | Local development — running notebooks, training models, running tests and lint. |
 
 `requirements-dev.txt` inherits from `requirements.txt` via `-r requirements.txt`,
 so you only ever need to install one of them.
