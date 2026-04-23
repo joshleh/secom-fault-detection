@@ -73,6 +73,351 @@ def load_pipeline():
     return pipeline
 
 
+@st.cache_data(show_spinner=False)
+def _diagnose_cached(_pipeline, index: int, top_k: int = 10):
+    """Memoize per-wafer diagnostics so re-renders don't re-run SHAP."""
+    return _pipeline.diagnose_by_index(index, top_k=top_k)
+
+
+@st.cache_data(show_spinner="Computing predictions for all wafers...")
+def _predict_all(_pipeline) -> pd.DataFrame:
+    """Run the model over the full dataset for aggregate-metrics / clustering pages."""
+    import numpy as np
+
+    X_raw = _pipeline._X_clean
+    X_proc = _pipeline._transform(X_raw)
+    probs = _pipeline.model.predict_proba(X_proc)[:, 1]
+    preds = (probs >= _pipeline.threshold).astype(int)
+    return pd.DataFrame({
+        "wafer_index": np.arange(len(probs)),
+        "actual": _pipeline._y.values,
+        "probability": probs,
+        "prediction": preds,
+    })
+
+
+@st.cache_data(show_spinner="Computing SHAP signatures for all failures...")
+def _failure_shap_matrix(_pipeline) -> pd.DataFrame:
+    """SHAP values for every failed wafer — used by the clustering page."""
+    rows = {}
+    for idx in _pipeline.fail_indices:
+        try:
+            diag = _pipeline.diagnose_by_index(idx, top_k=50)
+            rows[idx] = diag.shap_values
+        except Exception:
+            continue
+    return pd.DataFrame(rows).T
+
+
+def render_compare_page(pipeline):
+    """Side-by-side comparison of two wafers."""
+    st.title("Compare Two Wafers")
+    st.markdown(
+        "Pick any two wafers to see how their predictions, top SHAP drivers, "
+        "and sensor deviations differ. Useful for understanding what makes a "
+        "specific failure unusual relative to a normal wafer."
+    )
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        idx_a = st.number_input(
+            "Wafer A", min_value=1, max_value=pipeline.n_samples, value=1, step=1,
+        ) - 1
+    with col_b:
+        default_b = pipeline.fail_indices[0] + 1 if pipeline.fail_indices else 2
+        idx_b = st.number_input(
+            "Wafer B", min_value=1, max_value=pipeline.n_samples, value=default_b, step=1,
+        ) - 1
+
+    diag_a = _diagnose_cached(pipeline, int(idx_a), top_k=10)
+    diag_b = _diagnose_cached(pipeline, int(idx_b), top_k=10)
+
+    st.markdown("### Predictions")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(
+        f"Wafer {idx_a + 1}",
+        diag_a.prediction,
+        delta=f"{diag_a.probability:.1%} fail prob",
+        delta_color="inverse",
+    )
+    m2.metric(
+        "Actual A",
+        "FAIL" if pipeline.get_label(int(idx_a)) == 1 else "PASS",
+    )
+    m3.metric(
+        f"Wafer {idx_b + 1}",
+        diag_b.prediction,
+        delta=f"{diag_b.probability:.1%} fail prob",
+        delta_color="inverse",
+    )
+    m4.metric(
+        "Actual B",
+        "FAIL" if pipeline.get_label(int(idx_b)) == 1 else "PASS",
+    )
+
+    st.markdown("### SHAP — sensor contributions side by side")
+    union = list(dict.fromkeys(diag_a.top_shap_features[:8] + diag_b.top_shap_features[:8]))
+    shap_a = [float(diag_a.shap_values[f]) for f in union]
+    shap_b = [float(diag_b.shap_values[f]) for f in union]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name=f"Wafer {idx_a + 1}", x=shap_a, y=union, orientation="h",
+        marker_color=COLORS["pass"],
+    ))
+    fig.add_trace(go.Bar(
+        name=f"Wafer {idx_b + 1}", x=shap_b, y=union, orientation="h",
+        marker_color=COLORS["fail"],
+    ))
+    fig.update_layout(
+        barmode="group",
+        xaxis_title="SHAP value (push toward FAIL →)",
+        yaxis_title="Sensor",
+        height=max(400, len(union) * 35),
+        margin=dict(l=20, r=20, t=20, b=40),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        **PLOTLY_LAYOUT,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("### Z-score deviations (vs healthy baseline)")
+    diff_rows = []
+    for f in union:
+        diff_rows.append({
+            "Sensor": f,
+            f"Z-Score (Wafer {idx_a + 1})": round(float(diag_a.deviations_z[f]), 2),
+            f"Z-Score (Wafer {idx_b + 1})": round(float(diag_b.deviations_z[f]), 2),
+            "|Difference|": round(abs(
+                float(diag_a.deviations_z[f]) - float(diag_b.deviations_z[f])
+            ), 2),
+        })
+    diff_df = pd.DataFrame(diff_rows).sort_values("|Difference|", ascending=False)
+    st.dataframe(diff_df, use_container_width=True, hide_index=True)
+
+
+def render_metrics_page(pipeline):
+    """Confusion matrix + ROC + PR curve at a user-tunable threshold."""
+    import numpy as np
+    from sklearn.metrics import (
+        average_precision_score,
+        confusion_matrix,
+        precision_recall_curve,
+        roc_auc_score,
+        roc_curve,
+    )
+
+    st.title("Aggregate Model Metrics")
+    st.markdown(
+        "Held-out predictions over the entire dataset. Drag the threshold "
+        "slider to see how the confusion matrix and operating point shift "
+        "in real time. The dashed line on the PR/ROC curves marks the "
+        "currently-selected threshold."
+    )
+
+    preds = _predict_all(pipeline)
+    y_true = preds["actual"].values
+    y_prob = preds["probability"].values
+
+    threshold = st.slider(
+        "Decision threshold",
+        min_value=0.0, max_value=1.0,
+        value=float(pipeline.threshold),
+        step=0.01,
+        help=f"Tuned threshold from training: {pipeline.threshold:.3f}",
+    )
+    y_pred = (y_prob >= threshold).astype(int)
+
+    cm = confusion_matrix(y_true, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Precision (Fail)", f"{precision:.2%}")
+    m2.metric("Recall (Fail)", f"{recall:.2%}")
+    m3.metric("F1 (Fail)", f"{f1:.3f}")
+    m4.metric("ROC-AUC", f"{roc_auc_score(y_true, y_prob):.3f}")
+
+    col_cm, col_curves = st.columns([1, 2])
+
+    with col_cm:
+        st.markdown("#### Confusion matrix")
+        cm_z = [[int(tn), int(fp)], [int(fn), int(tp)]]
+        cm_text = [
+            [f"TN<br>{tn}", f"FP<br>{fp}"],
+            [f"FN<br>{fn}", f"TP<br>{tp}"],
+        ]
+        fig_cm = go.Figure(go.Heatmap(
+            z=cm_z,
+            x=["Pred PASS", "Pred FAIL"],
+            y=["Actual PASS", "Actual FAIL"],
+            text=cm_text,
+            texttemplate="%{text}",
+            textfont={"size": 14, "color": "#FFFFFF"},
+            colorscale="Blues",
+            showscale=False,
+        ))
+        fig_cm.update_layout(height=320, margin=dict(l=20, r=20, t=20, b=20), **PLOTLY_LAYOUT)
+        st.plotly_chart(fig_cm, use_container_width=True)
+
+    with col_curves:
+        st.markdown("#### ROC and Precision-Recall curves")
+        fpr, tpr, roc_thr = roc_curve(y_true, y_prob)
+        prec, rec, pr_thr = precision_recall_curve(y_true, y_prob)
+        ap = average_precision_score(y_true, y_prob)
+
+        # Operating point on each curve
+        op_idx_roc = int(np.argmin(np.abs(roc_thr - threshold))) if len(roc_thr) else 0
+        op_idx_pr = int(np.argmin(np.abs(pr_thr - threshold))) if len(pr_thr) else 0
+
+        fig_curves = go.Figure()
+        fig_curves.add_trace(go.Scatter(
+            x=fpr, y=tpr, mode="lines",
+            name=f"ROC (AUC={roc_auc_score(y_true, y_prob):.3f})",
+            line=dict(color=COLORS["pass"]),
+        ))
+        fig_curves.add_trace(go.Scatter(
+            x=rec, y=prec, mode="lines",
+            name=f"PR (AP={ap:.3f})",
+            line=dict(color=COLORS["fail"]),
+        ))
+        fig_curves.add_trace(go.Scatter(
+            x=[fpr[op_idx_roc], rec[op_idx_pr]],
+            y=[tpr[op_idx_roc], prec[op_idx_pr]],
+            mode="markers",
+            name=f"Operating point (thr={threshold:.2f})",
+            marker=dict(size=12, color="#FFFFFF", symbol="diamond"),
+            showlegend=True,
+        ))
+        fig_curves.update_layout(
+            xaxis_title="FPR (ROC) / Recall (PR)",
+            yaxis_title="TPR (ROC) / Precision (PR)",
+            height=400,
+            margin=dict(l=20, r=20, t=20, b=40),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            **PLOTLY_LAYOUT,
+        )
+        st.plotly_chart(fig_curves, use_container_width=True)
+
+    with st.expander("Probability distribution by actual class"):
+        fig_dist = go.Figure()
+        fig_dist.add_trace(go.Histogram(
+            x=y_prob[y_true == 0], name="Actual PASS",
+            marker_color=COLORS["pass"], opacity=0.7, nbinsx=40,
+        ))
+        fig_dist.add_trace(go.Histogram(
+            x=y_prob[y_true == 1], name="Actual FAIL",
+            marker_color=COLORS["fail"], opacity=0.7, nbinsx=40,
+        ))
+        fig_dist.add_vline(x=threshold, line_dash="dash", line_color="#FFFFFF",
+                           annotation_text=f"thr={threshold:.2f}")
+        fig_dist.update_layout(
+            xaxis_title="Predicted failure probability",
+            yaxis_title="Count",
+            barmode="overlay",
+            height=350, margin=dict(l=20, r=20, t=20, b=40),
+            **PLOTLY_LAYOUT,
+        )
+        st.plotly_chart(fig_dist, use_container_width=True)
+
+
+def render_clustering_page(pipeline):
+    """K-means clustering of failures by their SHAP signatures."""
+    from sklearn.cluster import KMeans
+    from sklearn.decomposition import PCA
+
+    st.title("Failure Pattern Clustering")
+    st.markdown(
+        "Each failed wafer has a SHAP signature — a 50-dimensional vector "
+        "of how strongly each sensor pushed the model toward FAIL. K-means "
+        "groups failures with similar signatures, surfacing distinct "
+        "**failure modes** rather than treating every defect as one big class."
+    )
+
+    fail_shap = _failure_shap_matrix(pipeline)
+    if fail_shap.empty:
+        st.warning("No failures available for clustering.")
+        return
+
+    st.markdown(
+        f"Clustering **{len(fail_shap)} failed wafers** by their SHAP signatures."
+    )
+
+    n_clusters = st.slider("Number of clusters (failure modes)", 2, 6, 3)
+    km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    labels = km.fit_predict(fail_shap.values)
+
+    pca = PCA(n_components=2, random_state=42)
+    coords = pca.fit_transform(fail_shap.values)
+
+    plot_df = pd.DataFrame({
+        "wafer": [int(i) + 1 for i in fail_shap.index],
+        "PC1": coords[:, 0],
+        "PC2": coords[:, 1],
+        "cluster": [f"Mode {c + 1}" for c in labels],
+    })
+
+    palette = ["#EF5350", "#FFA726", "#4FC3F7", "#AB47BC", "#66BB6A", "#FFCA28"]
+    fig = go.Figure()
+    for cid in sorted(plot_df["cluster"].unique()):
+        sub = plot_df[plot_df["cluster"] == cid]
+        fig.add_trace(go.Scatter(
+            x=sub["PC1"], y=sub["PC2"], mode="markers",
+            name=cid,
+            marker=dict(size=10, color=palette[int(cid.split()[-1]) - 1]),
+            text=[f"Wafer {w}" for w in sub["wafer"]],
+            hovertemplate="%{text}<br>PC1=%{x:.2f}, PC2=%{y:.2f}<extra></extra>",
+        ))
+    fig.update_layout(
+        xaxis_title=f"PC1 ({pca.explained_variance_ratio_[0]:.0%} var)",
+        yaxis_title=f"PC2 ({pca.explained_variance_ratio_[1]:.0%} var)",
+        height=500, margin=dict(l=20, r=20, t=20, b=40),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        **PLOTLY_LAYOUT,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("### Top driver sensors per failure mode")
+    centroid_df = pd.DataFrame(km.cluster_centers_, columns=fail_shap.columns)
+
+    for cid in range(n_clusters):
+        n_in = int((labels == cid).sum())
+        with st.expander(f"Mode {cid + 1} — {n_in} wafers"):
+            top_drivers = (
+                centroid_df.iloc[cid]
+                .reindex(centroid_df.iloc[cid].abs().sort_values(ascending=False).index)
+                .head(8)
+            )
+            members = [
+                int(i) + 1
+                for i, lbl in zip(fail_shap.index, labels, strict=True)
+                if lbl == cid
+            ]
+
+            fig_top = go.Figure(go.Bar(
+                x=top_drivers.values[::-1],
+                y=top_drivers.index[::-1],
+                orientation="h",
+                marker_color=[
+                    COLORS["fail"] if v > 0 else COLORS["pass"]
+                    for v in top_drivers.values[::-1]
+                ],
+            ))
+            fig_top.update_layout(
+                xaxis_title="Mean SHAP value",
+                height=max(250, 35 * len(top_drivers)),
+                margin=dict(l=20, r=20, t=10, b=40),
+                **PLOTLY_LAYOUT,
+            )
+            st.plotly_chart(fig_top, use_container_width=True)
+
+            st.markdown(
+                f"**Wafers in this mode:** {', '.join(str(m) for m in members[:30])}"
+                + (f" *(+{len(members) - 30} more)*" if len(members) > 30 else "")
+            )
+
+
 def render_drift_page(pipeline):
     """Population Stability Index + KS test against the training baseline."""
     st.title("Drift Monitor")
@@ -235,14 +580,30 @@ def main():
     # ── Sidebar: page selector ────────────────────────────
     page = st.sidebar.radio(
         "View",
-        ["Wafer Diagnostic", "Drift Monitor"],
+        [
+            "Wafer Diagnostic",
+            "Compare Wafers",
+            "Aggregate Metrics",
+            "Failure Clustering",
+            "Drift Monitor",
+        ],
         index=0,
-        help="Switch between per-wafer diagnostics and population-level drift monitoring.",
+        help="Per-wafer drilldown, side-by-side comparison, model-wide metrics, "
+             "or population-level monitoring.",
     )
     st.sidebar.markdown("---")
 
     if page == "Drift Monitor":
         render_drift_page(pipeline)
+        return
+    if page == "Compare Wafers":
+        render_compare_page(pipeline)
+        return
+    if page == "Aggregate Metrics":
+        render_metrics_page(pipeline)
+        return
+    if page == "Failure Clustering":
+        render_clustering_page(pipeline)
         return
 
     # ── Sidebar: Sample selection ─────────────────────────
@@ -298,7 +659,12 @@ def main():
     # ── Run diagnostics ──────────────────────────────────
     top_k = st.sidebar.slider("Top sensors to analyze", min_value=3, max_value=20, value=10)
 
-    diag = pipeline.diagnose_sample(raw_features, sample_index=sample_idx, top_k=top_k)
+    if mode == "Pick a wafer":
+        # Use the cached helper for the common path; SHAP on the same wafer
+        # only runs once per session.
+        diag = _diagnose_cached(pipeline, int(sample_idx), top_k=top_k)
+    else:
+        diag = pipeline.diagnose_sample(raw_features, sample_index=sample_idx, top_k=top_k)
 
     # ── Manual override UI (after initial diagnosis to show feature names) ──
     if mode == "Manual sensor override":
