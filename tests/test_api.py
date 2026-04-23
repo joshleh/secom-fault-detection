@@ -97,3 +97,40 @@ def test_drift_endpoint_rejects_wrong_shape(client):
 def test_drift_endpoint_rejects_empty_batch(client):
     r = client.post("/drift", json={"samples": []})
     assert r.status_code == 422
+
+
+def test_metadata_endpoint(client):
+    r = client.get("/metadata")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["model_version"]
+    assert body["n_input_features"] > 0
+    assert len(body["selected_feature_names"]) > 0
+    assert isinstance(body["drift_reference_loaded"], bool)
+
+
+def test_request_id_header_is_set(client):
+    r = client.get("/health")
+    assert r.headers.get("X-Request-ID")
+    assert len(r.headers["X-Request-ID"]) >= 8
+
+
+def test_predict_batch_returns_per_sample_predictions(client, sample_features):
+    r = client.post("/predict/batch", json={"samples": [sample_features, sample_features]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["n_samples"] == 2
+    assert len(body["predictions"]) == 2
+    for item in body["predictions"]:
+        assert item["prediction"] in {"PASS", "FAIL"}
+        assert 0.0 <= item["probability"] <= 1.0
+
+
+def test_predict_batch_rejects_wrong_shape(client, sample_features):
+    r = client.post("/predict/batch", json={"samples": [sample_features, [1.0, 2.0]]})
+    assert r.status_code == 422
+
+
+def test_predict_batch_rejects_empty(client):
+    r = client.post("/predict/batch", json={"samples": []})
+    assert r.status_code == 422

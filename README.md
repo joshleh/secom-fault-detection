@@ -110,6 +110,14 @@ SHAP (SHapley Additive exPlanations) breaks each prediction into per-sensor cont
 
 A [FastAPI](https://fastapi.tiangolo.com/) endpoint provides the same prediction + explanation as the dashboard, but as a REST API (useful for integrating with other systems):
 
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | liveness check + lightweight pipeline metadata |
+| `GET /metadata` | full pipeline + model info, including selected feature names |
+| `POST /predict` | single wafer prediction with SHAP explanation |
+| `POST /predict/batch` | many wafers in one call (no SHAP, optimized) |
+| `POST /drift` | PSI report for a recent batch vs the training baseline |
+
 ```
 POST /predict
 {
@@ -131,6 +139,11 @@ POST /predict
 ```bash
 uvicorn api.main:app --reload --port 8000
 ```
+
+The API also adds an `X-Request-ID` header to every response and emits
+structured `event=request request_id=... method=... path=... status=... latency_ms=...`
+logs for easy aggregation. CORS origins are configurable via the
+`CORS_ORIGINS` env var (comma-separated list, default `*` for dev).
 
 ## Repo Structure
 ```
