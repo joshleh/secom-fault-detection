@@ -55,6 +55,7 @@ streamlit run app/streamlit_app.py
 | Yield Debug Dashboard (Streamlit) | ✅ Complete |
 | Failure Pattern Analysis Notebook | ✅ Complete |
 | Docker Deployment | ✅ Complete |
+| Drift Monitoring (PSI + KS) | ✅ Complete |
 
 ## Key Findings
 
@@ -242,7 +243,21 @@ jupyter notebook notebooks/05_yield_debug_analysis.ipynb
 - **Serving:** FastAPI REST endpoint with SHAP explanations, Dockerized for deployment
 - **Dashboard:** Streamlit interactive tool for inspecting individual wafers
 
+### Drift Monitoring
+
+Manufacturing processes drift over time. The dashboard's **Drift Monitor**
+tab and the API's `/drift` endpoint compute, per sensor:
+
+- **Population Stability Index (PSI)** — bucketed KL-style score against
+  the training distribution. Conventional thresholds: `<0.10` stable,
+  `0.10–0.25` moderate, `>0.25` significant (consider retraining).
+- **Two-sample Kolmogorov–Smirnov test** — non-parametric p-value for
+  "these two samples come from the same distribution".
+
+The training run persists `models/drift_reference.json` (decile summary,
+~50 KB) so PSI can be computed at serving time without keeping the full
+training set around.
+
 ## Future Work
-- Monitor for data drift — detect when incoming sensor data stops matching what the model was trained on
 - Integration with manufacturing execution systems (MES) for real-time tracking
 - Build a library of known failure patterns from past investigations

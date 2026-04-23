@@ -21,6 +21,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.diagnostics import DiagnosticsPipeline, generate_root_cause_summary
+from src.drift import compute_drift_report
 
 # ─── Page config ──────────────────────────────────────────
 
@@ -72,6 +73,127 @@ def load_pipeline():
     return pipeline
 
 
+def render_drift_page(pipeline):
+    """Population Stability Index + KS test against the training baseline."""
+    st.title("Drift Monitor")
+    st.markdown(
+        "Manufacturing processes drift over time — sensor calibrations change, "
+        "raw-material lots vary, equipment ages. This page measures whether a "
+        "recent batch of wafers still looks statistically like the data the model "
+        "was trained on. Two complementary tests per sensor:\n\n"
+        "- **Population Stability Index (PSI)** — bucketed KL-style score. "
+        "Conventional thresholds: <0.10 stable, 0.10–0.25 moderate drift, "
+        ">0.25 significant drift (consider retraining).\n"
+        "- **Two-sample Kolmogorov–Smirnov test** — non-parametric p-value for "
+        "\"these two samples come from the same distribution\"."
+    )
+
+    st.markdown("### Choose a comparison")
+    mode = st.radio(
+        "Source for the recent batch",
+        [
+            "Use a slice of the dataset (demo)",
+            "Upload a CSV of recent wafers",
+        ],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    reference = pipeline._X_clean  # full training distribution
+
+    current = None
+    if mode == "Use a slice of the dataset (demo)":
+        col_a, col_b = st.columns([2, 1])
+        with col_a:
+            n_slice = st.slider(
+                "Number of wafers in the recent batch",
+                min_value=50, max_value=min(500, pipeline.n_samples - 50),
+                value=200, step=50,
+            )
+        with col_b:
+            tail = st.checkbox(
+                "Take the last N (vs random sample)",
+                value=True,
+                help="The last N wafers of the dataset simulate the most-recent production batch.",
+            )
+        current = reference.tail(n_slice) if tail else reference.sample(n_slice, random_state=0)
+    else:
+        uploaded = st.file_uploader(
+            "Upload a CSV with the same 446 columns as X_clean.csv",
+            type=["csv"],
+        )
+        if uploaded is not None:
+            try:
+                current = pd.read_csv(uploaded)
+                missing = set(reference.columns) - set(current.columns)
+                if missing:
+                    st.error(
+                        f"Uploaded CSV is missing {len(missing)} column(s) "
+                        f"(showing first 5): {sorted(missing)[:5]}"
+                    )
+                    current = None
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Failed to read CSV: {e}")
+                current = None
+
+    if current is None or len(current) == 0:
+        st.info("Pick a batch above to run drift analysis.")
+        return
+
+    st.markdown(
+        f"**Reference (training):** {len(reference):,} wafers &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"**Current batch:** {len(current):,} wafers"
+    )
+
+    with st.spinner("Computing PSI + KS for 446 features..."):
+        report = compute_drift_report(reference, current)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Significant drift (PSI > 0.25)", report.n_significant)
+    with c2:
+        st.metric("Moderate drift (0.10–0.25)", report.n_moderate)
+    with c3:
+        no_drift = len(report.per_feature) - report.n_significant - report.n_moderate
+        st.metric("Stable (PSI < 0.10)", no_drift)
+
+    st.markdown("### Top 25 most-drifted sensors")
+    top = report.per_feature.head(25).reset_index()
+
+    severity_color = {
+        "significant": COLORS["fail"],
+        "moderate": COLORS["warn"],
+        "none": COLORS["ok"],
+        "unknown": "#888888",
+    }
+    bar_colors = [severity_color.get(s, "#888888") for s in top["severity"]]
+
+    fig = go.Figure(go.Bar(
+        x=top["psi"][::-1],
+        y=top["feature"][::-1],
+        orientation="h",
+        marker_color=bar_colors[::-1],
+        text=[f"{v:.3f}" for v in top["psi"][::-1]],
+        textposition="auto",
+        textfont=dict(color="#E0E0E0"),
+    ))
+    fig.add_vline(x=0.10, line_dash="dash", line_color="#FFA726", opacity=0.7,
+                  annotation_text="moderate", annotation_position="top")
+    fig.add_vline(x=0.25, line_dash="dash", line_color="#EF5350", opacity=0.7,
+                  annotation_text="significant", annotation_position="top")
+    fig.update_layout(
+        xaxis_title="PSI",
+        yaxis_title="Sensor",
+        height=max(400, len(top) * 22),
+        margin=dict(l=20, r=20, t=40, b=40),
+        **PLOTLY_LAYOUT,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Full per-feature drift table"):
+        st.dataframe(report.per_feature.reset_index(), use_container_width=True, hide_index=True)
+
+
 def main():
     # ── Header ────────────────────────────────────────────
     st.title("Semiconductor Yield Fault Detection")
@@ -108,6 +230,19 @@ def main():
             f"`python src/train.py` and that `data/processed/` contains "
             f"`X_clean.csv` and `y.csv`.\n\nError: {e}"
         )
+        return
+
+    # ── Sidebar: page selector ────────────────────────────
+    page = st.sidebar.radio(
+        "View",
+        ["Wafer Diagnostic", "Drift Monitor"],
+        index=0,
+        help="Switch between per-wafer diagnostics and population-level drift monitoring.",
+    )
+    st.sidebar.markdown("---")
+
+    if page == "Drift Monitor":
+        render_drift_page(pipeline)
         return
 
     # ── Sidebar: Sample selection ─────────────────────────

@@ -37,6 +37,7 @@ from sklearn.model_selection import train_test_split
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from src.drift import save_reference_summary
 from src.features import drop_highly_correlated, select_top_k_by_mutual_info
 from src.models import (
     build_random_forest,
@@ -133,6 +134,8 @@ def train_and_save(data_dir: str = "data/processed") -> None:
 
     with open(os.path.join(MODEL_DIR, "cv_metrics.json"), "w") as f:
         json.dump(cv_metrics.as_dict(), f, indent=2)
+
+    save_reference_summary(X_clean, os.path.join(MODEL_DIR, "drift_reference.json"))
 
     logger.info("\nAll artifacts saved to %s/", MODEL_DIR)
 

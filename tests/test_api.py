@@ -69,3 +69,31 @@ def test_predict_rejects_wrong_feature_count(client):
 def test_predict_rejects_empty_features(client):
     r = client.post("/predict", json={"features": []})
     assert r.status_code == 422
+
+
+def test_drift_endpoint_returns_summary(client, sample_features):
+    """Drift report on the first 50 wafers vs the training baseline."""
+    csv_path = os.path.join(
+        os.path.dirname(__file__), "..", "dashboard_assets", "data", "X_clean.csv"
+    )
+    batch = pd.read_csv(csv_path).head(50).values.tolist()
+    r = client.post("/drift", json={"samples": batch})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["n_reference"] > 0
+    assert body["n_current"] == 50
+    assert body["n_significant"] >= 0
+    assert isinstance(body["top_drifted_features"], list)
+    if body["top_drifted_features"]:
+        item = body["top_drifted_features"][0]
+        assert {"feature", "psi", "severity"} <= set(item.keys())
+
+
+def test_drift_endpoint_rejects_wrong_shape(client):
+    r = client.post("/drift", json={"samples": [[1.0, 2.0]]})
+    assert r.status_code == 422
+
+
+def test_drift_endpoint_rejects_empty_batch(client):
+    r = client.post("/drift", json={"samples": []})
+    assert r.status_code == 422

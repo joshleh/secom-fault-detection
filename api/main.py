@@ -8,6 +8,7 @@ same feature pipeline used during training:
 
 Endpoints:
   POST /predict  — returns pass/fail, probability, and top contributing sensors
+  POST /drift    — PSI + KS drift report for a recent batch vs the training baseline
   GET  /health   — liveness check with pipeline metadata
 """
 
@@ -21,6 +22,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, field_validator
 
 from src.artifacts import load_pipeline_artifacts
+from src.drift import compute_drift_from_summary, load_reference_summary
 from src.preprocess import run_preprocessing_pipeline
 
 # ─── Paths ───────────────────────────────────────────────
@@ -37,6 +39,7 @@ corr_kept_cols: list[str] = []
 mi_selected_cols: list[str] = []
 N_INPUT_FEATURES: int = 0
 THRESHOLD: float = 0.5
+drift_reference_summary: dict | None = None
 
 
 @asynccontextmanager
@@ -44,7 +47,7 @@ async def lifespan(app: FastAPI):
     """Load all pipeline artifacts on startup."""
     global model, explainer, preprocess_artifacts
     global input_feature_names, corr_kept_cols, mi_selected_cols
-    global N_INPUT_FEATURES, THRESHOLD
+    global N_INPUT_FEATURES, THRESHOLD, drift_reference_summary
 
     artifacts = load_pipeline_artifacts(MODEL_DIR)
     preprocess_artifacts = artifacts.preprocess_artifacts
@@ -55,6 +58,10 @@ async def lifespan(app: FastAPI):
     model = artifacts.model
     THRESHOLD = artifacts.threshold
     explainer = shap.TreeExplainer(model)
+
+    drift_reference_summary = load_reference_summary(
+        os.path.join(MODEL_DIR, "drift_reference.json")
+    )
 
     yield
 
@@ -95,6 +102,32 @@ class PredictResponse(BaseModel):
     prediction: str
     probability: float
     top_contributing_features: list[FeatureContribution]
+
+
+class DriftRequest(BaseModel):
+    """Recent batch of wafers as a list of feature vectors (446 each)."""
+    samples: list[list[float]]
+
+    @field_validator("samples")
+    @classmethod
+    def check_not_empty(cls, v):
+        if not v:
+            raise ValueError("samples list must not be empty")
+        return v
+
+
+class FeatureDrift(BaseModel):
+    feature: str
+    psi: float
+    severity: str
+
+
+class DriftResponse(BaseModel):
+    n_reference: int
+    n_current: int
+    n_significant: int
+    n_moderate: int
+    top_drifted_features: list[FeatureDrift]
 
 
 # ─── Inference helpers ───────────────────────────────────
@@ -183,4 +216,53 @@ def predict(req: PredictRequest):
         prediction=label,
         probability=round(prob_fail, 4),
         top_contributing_features=top_features,
+    )
+
+
+@app.post("/drift", response_model=DriftResponse)
+def drift(req: DriftRequest):
+    """
+    PSI drift report for a recent batch vs the training-time baseline.
+
+    Each row in `samples` must be a 446-feature vector (same input shape
+    as /predict). Returns the top-10 features by PSI; the full per-feature
+    table is computed but only the largest movers are returned to keep
+    the response small.
+    """
+    if drift_reference_summary is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Drift reference not available. Retrain with the latest "
+                "src/train.py to produce models/drift_reference.json."
+            ),
+        )
+
+    bad = [i for i, row in enumerate(req.samples) if len(row) != N_INPUT_FEATURES]
+    if bad:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Each sample must have {N_INPUT_FEATURES} features; "
+                f"sample(s) {bad[:5]}{'...' if len(bad) > 5 else ''} did not."
+            ),
+        )
+
+    current = pd.DataFrame(req.samples, columns=input_feature_names)
+    report = compute_drift_from_summary(drift_reference_summary, current)
+
+    top = report.per_feature.head(10).reset_index()
+    return DriftResponse(
+        n_reference=report.n_reference,
+        n_current=report.n_current,
+        n_significant=report.n_significant,
+        n_moderate=report.n_moderate,
+        top_drifted_features=[
+            FeatureDrift(
+                feature=row["feature"],
+                psi=float(row["psi"]) if not pd.isna(row["psi"]) else 0.0,
+                severity=row["severity"],
+            )
+            for _, row in top.iterrows()
+        ],
     )
