@@ -4,21 +4,24 @@ __pycache__/
 *.egg-info/
 dist/
 build/
- 
+.pytest_cache/
+.ruff_cache/
+
 # ── Environments ──
 .venv/
 .env
- 
+
 # ── Jupyter ──
 .ipynb_checkpoints/
- 
+
 # ── IDE ──
 .vscode/
 .idea/
- 
+
 # ── Project-specific (generated at runtime) ──
 /data/
 /models/
+notebooks/data/
 mlruns/
 outputs/
 

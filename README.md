@@ -190,12 +190,18 @@ self-contained (~6 MB total).
 
 ## Dependencies
 
+**Supported Python: 3.11 or 3.12** (CI exercises both). The version is
+declared in `.python-version` (for `pyenv` / `uv` users), in
+`pyproject.toml` (`tool.ruff.target-version`), in the `Dockerfile`
+base image, and in the CI matrix. To raise the minimum version, all
+four locations need updating in lockstep.
+
 This project uses two requirements files:
 
 | File | What it covers | When to use |
 |---|---|---|
-| `requirements.txt` | Dashboard runtime only (numpy, pandas, scikit-learn, joblib, plotly, shap, streamlit) | Streamlit Cloud deploys from this automatically. Also sufficient if you only want to run the dashboard locally. |
-| `requirements-dev.txt` | Everything above **plus** torch, mlflow, fastapi, uvicorn, jupyter, matplotlib, seaborn | Local development — running notebooks, training models, serving the API. |
+| `requirements.txt` | Dashboard + API runtime (numpy, pandas, scipy, scikit-learn, joblib, plotly, shap, streamlit) | Streamlit Cloud deploys from this automatically. Also sufficient if you only want to run the dashboard locally. |
+| `requirements-dev.txt` | Everything above **plus** torch, mlflow, fastapi, uvicorn, jupyter, matplotlib, seaborn, pytest, ruff, httpx | Local development — running notebooks, training models, serving the API, running tests. |
 
 `requirements-dev.txt` inherits from `requirements.txt` via `-r requirements.txt`,
 so you only ever need to install one of them.
