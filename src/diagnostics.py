@@ -15,9 +15,7 @@ Key classes:
   - generate_root_cause_summary(): builds a plain-English diagnostic summary
 """
 
-import os
 from dataclasses import dataclass
-from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -25,7 +23,6 @@ import shap
 
 from src.artifacts import load_pipeline_artifacts
 from src.preprocess import load_clean, run_preprocessing_pipeline
-
 
 # ─── Data classes ─────────────────────────────────────────
 
@@ -49,9 +46,9 @@ class SampleDiagnostics:
     feature_values: pd.Series
     shap_values: pd.Series
     deviations_z: pd.Series
-    top_shap_features: List[str]
-    top_deviated_features: List[str]
-    combined_risk_features: List[str]
+    top_shap_features: list[str]
+    top_deviated_features: list[str]
+    combined_risk_features: list[str]
 
 
 # ─── Pipeline loader ─────────────────────────────────────
@@ -74,7 +71,7 @@ class DiagnosticsPipeline:
         self.input_feature_names = []
         self.corr_kept_cols = []
         self.mi_selected_cols = []
-        self.baseline: Optional[BaselineProfile] = None
+        self.baseline: BaselineProfile | None = None
         self._X_clean = None
         self._y = None
 
@@ -132,11 +129,11 @@ class DiagnosticsPipeline:
         return len(self._X_clean)
 
     @property
-    def fail_indices(self) -> List[int]:
+    def fail_indices(self) -> list[int]:
         return self._y[self._y == 1].index.tolist()
 
     @property
-    def pass_indices(self) -> List[int]:
+    def pass_indices(self) -> list[int]:
         return self._y[self._y == 0].index.tolist()
 
     def diagnose_sample(self, raw_features: pd.Series, sample_index: int = -1,
@@ -199,12 +196,12 @@ class DiagnosticsPipeline:
         sample = self.get_sample(index)
         return self.diagnose_sample(sample, sample_index=index, top_k=top_k)
 
-    def batch_diagnose(self, indices: List[int], top_k: int = 10) -> List[SampleDiagnostics]:
+    def batch_diagnose(self, indices: list[int], top_k: int = 10) -> list[SampleDiagnostics]:
         """Diagnose multiple samples (for notebook analysis)."""
         return [self.diagnose_by_index(i, top_k=top_k) for i in indices]
 
     def get_baseline_comparison_df(self, diag: SampleDiagnostics,
-                                    features: Optional[List[str]] = None) -> pd.DataFrame:
+                                    features: list[str] | None = None) -> pd.DataFrame:
         """
         Build a comparison table: sample value vs baseline stats for selected features.
         """
@@ -223,7 +220,7 @@ class DiagnosticsPipeline:
             })
         return pd.DataFrame(rows)
 
-    def get_failure_pattern_summary(self, indices: Optional[List[int]] = None,
+    def get_failure_pattern_summary(self, indices: list[int] | None = None,
                                      top_k: int = 10) -> pd.DataFrame:
         """
         Aggregate top sensor drivers across multiple failed samples.
@@ -250,11 +247,11 @@ class DiagnosticsPipeline:
             return pd.DataFrame()
 
         summary = pd.DataFrame({
-            "Times in Top-{0}".format(top_k): feature_counts,
+            f"Times in Top-{top_k}": feature_counts,
             "Mean |SHAP|": (shap_accumulator / n),
         }).sort_values("Mean |SHAP|", ascending=False).head(top_k)
 
-        summary["Frequency %"] = (summary["Times in Top-{0}".format(top_k)] / n * 100).round(1)
+        summary["Frequency %"] = (summary[f"Times in Top-{top_k}"] / n * 100).round(1)
         return summary
 
 

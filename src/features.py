@@ -111,7 +111,7 @@ def compute_balanced_weights(y: pd.Series) -> dict:
     """
     classes = np.array(sorted(y.unique()))
     weights = compute_class_weight("balanced", classes=classes, y=y)
-    weight_dict = dict(zip(classes, weights))
+    weight_dict = dict(zip(classes, weights, strict=False))
 
     logger.info("Class weights: %s", weight_dict)
     return weight_dict

@@ -1,63 +1,71 @@
-"""
-Smoke test for the SECOM API (notebook 02 pipeline).
+"""Smoke tests for the SECOM API using FastAPI's TestClient.
 
-Usage:
-    1. Start the API:  uvicorn api.main:app --reload
-    2. Run this:       python tests/test_api.py
+Runs against the in-process app (no live server needed) and uses the
+committed dashboard_assets/ snapshot so it works in CI without retraining.
 """
 
-import requests
+import os
+
 import pandas as pd
+import pytest
+from fastapi.testclient import TestClient
 
-API_URL = "http://localhost:8000"
+# Point the API at the committed dashboard snapshot so tests are self-contained
+os.environ.setdefault(
+    "MODEL_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "dashboard_assets", "models"),
+)
+
+from api.main import app  # noqa: E402  (import after env var)
 
 
-def test_health():
-    r = requests.get(f"{API_URL}/health")
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture(scope="module")
+def sample_features():
+    """First wafer from the committed dashboard snapshot (446 features)."""
+    csv_path = os.path.join(
+        os.path.dirname(__file__), "..", "dashboard_assets", "data", "X_clean.csv"
+    )
+    return pd.read_csv(csv_path).iloc[0].tolist()
+
+
+def test_health(client):
+    r = client.get("/health")
     assert r.status_code == 200
-    data = r.json()
-    assert data["status"] == "healthy"
-    pipe = data["pipeline"]
-    print(f"✓ /health → {pipe['input_features']} input → "
-          f"{pipe['after_corr_filter']} corr → "
-          f"{pipe['after_mi_select']} MI → "
-          f"RF ({pipe['model_trees']} trees)")
+    body = r.json()
+    assert body["status"] == "healthy"
+    pipe = body["pipeline"]
+    assert pipe["input_features"] > 0
+    assert pipe["after_corr_filter"] > 0
+    assert pipe["after_mi_select"] > 0
+    assert pipe["model_trees"] > 0
 
 
-def test_predict():
-    # Grab first sample from the dataset (446 features)
-    X = pd.read_csv("data/processed/X_clean.csv")
-    sample = X.iloc[0].tolist()
-
-    r = requests.post(f"{API_URL}/predict", json={"features": sample})
+def test_predict_returns_valid_schema(client, sample_features):
+    r = client.post("/predict", json={"features": sample_features})
     assert r.status_code == 200
+    body = r.json()
+    assert body["prediction"] in {"PASS", "FAIL"}
+    assert 0.0 <= body["probability"] <= 1.0
+    contributions = body["top_contributing_features"]
+    assert isinstance(contributions, list)
+    assert len(contributions) == 5
+    for entry in contributions:
+        assert "feature" in entry
+        assert "shap_value" in entry
+        assert isinstance(entry["shap_value"], float)
 
-    data = r.json()
-    print(f"✓ /predict →")
-    print(f"  prediction: {data['prediction']}")
-    print(f"  probability: {data['probability']}")
-    print(f"  top features:")
-    for feat in data["top_contributing_features"]:
-        print(f"    {feat['feature']:>14s}  SHAP={feat['shap_value']:+.6f}")
 
-
-def test_wrong_feature_count():
-    """API should reject input with wrong number of features."""
-    r = requests.post(f"{API_URL}/predict", json={"features": [1.0, 2.0]})
+def test_predict_rejects_wrong_feature_count(client):
+    r = client.post("/predict", json={"features": [1.0, 2.0]})
     assert r.status_code == 422
-    print(f"✓ Wrong feature count → 422 (expected)")
 
 
-def test_empty_features():
-    """API should reject empty feature list."""
-    r = requests.post(f"{API_URL}/predict", json={"features": []})
+def test_predict_rejects_empty_features(client):
+    r = client.post("/predict", json={"features": []})
     assert r.status_code == 422
-    print(f"✓ Empty features → 422 (expected)")
-
-
-if __name__ == "__main__":
-    test_health()
-    test_predict()
-    test_wrong_feature_count()
-    test_empty_features()
-    print("\nAll tests passed.")

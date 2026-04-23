@@ -11,12 +11,11 @@ dataset. For each wafer, the dashboard shows:
 Run:  streamlit run app/streamlit_app.py
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st

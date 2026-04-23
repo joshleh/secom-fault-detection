@@ -13,7 +13,6 @@ Endpoints:
 
 import os
 from contextlib import asynccontextmanager
-from typing import List
 
 import numpy as np
 import pandas as pd
@@ -33,9 +32,9 @@ MODEL_DIR = os.environ.get(
 model = None
 explainer = None
 preprocess_artifacts: dict = {}
-input_feature_names: List[str] = []
-corr_kept_cols: List[str] = []
-mi_selected_cols: List[str] = []
+input_feature_names: list[str] = []
+corr_kept_cols: list[str] = []
+mi_selected_cols: list[str] = []
 N_INPUT_FEATURES: int = 0
 
 
@@ -74,7 +73,7 @@ app = FastAPI(
 
 
 class PredictRequest(BaseModel):
-    features: List[float]
+    features: list[float]
 
     @field_validator("features")
     @classmethod
@@ -92,13 +91,13 @@ class FeatureContribution(BaseModel):
 class PredictResponse(BaseModel):
     prediction: str
     probability: float
-    top_contributing_features: List[FeatureContribution]
+    top_contributing_features: list[FeatureContribution]
 
 
 # ─── Inference helpers ───────────────────────────────────
 
 
-def transform_input(raw_features: List[float]) -> pd.DataFrame:
+def transform_input(raw_features: list[float]) -> pd.DataFrame:
     """
     Apply the full NB02 feature pipeline to a single sample.
 

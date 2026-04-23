@@ -23,17 +23,15 @@ import os
 import sys
 
 import joblib
-import numpy as np
-import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.model_selection import train_test_split
 
 # Allow imports from project root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.preprocess import load_clean, run_preprocessing_pipeline, save_artifacts
 from src.features import drop_highly_correlated, select_top_k_by_mutual_info
+from src.preprocess import load_clean, run_preprocessing_pipeline, save_artifacts
 
 RANDOM_STATE = 42
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")

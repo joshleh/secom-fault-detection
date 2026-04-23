@@ -17,3 +17,8 @@ uvicorn[standard]==0.30.6
 
 # ── Notebooks ──
 jupyter==1.1.1
+
+# ── Testing & lint ──
+pytest==8.3.3
+httpx==0.27.2
+ruff==0.6.9

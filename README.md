@@ -1,5 +1,7 @@
 # Semiconductor Yield Fault Detection
 
+[![CI](https://github.com/joshleh/secom-fault-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/joshleh/secom-fault-detection/actions/workflows/ci.yml)
+
 ML-driven diagnostic tool for investigating semiconductor manufacturing failures.
 Combines a trained fault-detection model with interactive root-cause analysis,
 sensor-level deviation tracking, and failure pattern clustering.
