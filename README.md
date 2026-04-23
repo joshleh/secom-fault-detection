@@ -1,216 +1,282 @@
 # Semiconductor Yield Fault Detection
 
 [![CI](https://github.com/joshleh/secom-fault-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/joshleh/secom-fault-detection/actions/workflows/ci.yml)
+[![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](#dependencies)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Streamlit App](https://img.shields.io/badge/Streamlit-Live%20demo-FF4B4B?logo=streamlit&logoColor=white)](#dashboard)
 
-ML-driven diagnostic tool for investigating semiconductor manufacturing failures.
-Combines a trained fault-detection model with interactive root-cause analysis,
-sensor-level deviation tracking, and failure pattern clustering.
+End-to-end **machine-learning system** for catching defective semiconductor wafers
+before they ship — and explaining *why* the model thinks they're defective. Trained
+on the [UCI SECOM](https://archive.ics.uci.edu/ml/datasets/SECOM) sensor dataset
+(1,567 wafers × 590 sensors, 6.6% failure rate). Ships with an interactive
+**Streamlit dashboard**, a **FastAPI** inference service, **Docker** deployment,
+**drift monitoring**, **CI**, and a documented **model card**.
 
-## Background
+> **TL;DR for reviewers** — Random Forest with class weighting and an F1-tuned
+> decision threshold. ROC-AUC **0.747 ± 0.04** (5-fold stratified CV), Fail-Recall
+> **67%** at the tuned threshold (vs. 33% at default 0.5). Every prediction is
+> explained with SHAP, every endpoint is tested in CI, and the trained model
+> is bundled into a 100 MB Docker image that boots in under 5 s.
 
-Semiconductors (chips) are manufactured on thin silicon discs called **wafers**. Each wafer passes through dozens of manufacturing steps — etching, deposition, lithography, etc. — monitored by hundreds of **sensors** that record temperatures, pressures, gas flows, and other measurements.
+---
 
-At the end of the line, each wafer is tested: **pass** (good) or **fail** (defective). When failures spike, engineers need to figure out *which sensors* (and therefore which manufacturing steps) are responsible. That investigation is called **yield debugging** — "yield" being the percentage of wafers that pass.
+## Table of contents
 
-This project automates the first stage of that investigation: given a wafer's sensor readings, predict whether it will pass or fail, explain which sensors contributed most, and flag readings that look abnormal compared to healthy wafers.
+- [Why this project](#why-this-project)
+- [Dashboard tour](#dashboard) — five pages, with screenshots
+- [Architecture](#architecture)
+- [Results](#results)
+- [Tech stack](#tech-stack)
+- [Repo structure](#repo-structure)
+- [Setup](#setup)
+- [API](#api)
+- [Drift monitoring](#drift-monitoring)
+- [Engineering quality](#engineering-quality)
+- [Model card & limitations](#model-card)
+- [Future work](#future-work)
 
-**Dataset:** [UCI SECOM](https://archive.ics.uci.edu/ml/datasets/SECOM)
-— 1,567 wafers × 590 sensor readings, with pass/fail labels
+---
 
-## What This Does
+## Why this project
 
-When investigating manufacturing failures, an engineer needs to answer three questions:
+Semiconductors are manufactured on thin silicon discs (**wafers**) that pass
+through dozens of fabrication steps — etching, deposition, lithography, etc. —
+each monitored by hundreds of sensors recording temperature, pressure, gas flow,
+and so on. At the end of the line every wafer is tested: **pass** (good) or
+**fail** (defective). When failures spike, process engineers have to figure out
+*which sensors* — and therefore which manufacturing steps — are responsible.
+That investigation is called **yield debugging** ("yield" = fraction of wafers
+that pass), and it is one of the highest-leverage problems in fab operations:
+a 1% yield improvement on a single line can be worth millions of dollars per
+year.
 
-1. **Which wafers are high-risk?** → The model assigns a failure probability to every wafer
-2. **What sensors are driving the failure?** → SHAP explanations rank the most impactful sensors (SHAP is a method that breaks down a prediction into per-feature contributions)
-3. **Is this a known failure pattern?** → Baseline deviation analysis compares each wafer against the "normal" population (wafers that passed), and failure clustering groups similar failures together
+This project automates the first hour of that investigation:
 
-This project provides all three through a **Streamlit dashboard** for interactive debugging
-and a **Jupyter notebook** for deeper batch analysis.
+1. **Triage** — predict pass/fail for every wafer with calibrated probabilities.
+2. **Explain** — for each wafer, identify the sensors that drove the model's
+   decision (via SHAP) *and* show how far those readings sit from a healthy
+   baseline (Z-score).
+3. **Pattern-find** — cluster historical failures by their SHAP signatures to
+   surface distinct **failure modes** instead of treating every defect alike.
+4. **Monitor** — alert when a recent batch of wafers no longer looks like the
+   data the model was trained on (PSI + KS drift tests).
+
+All four are exposed through a five-page **Streamlit dashboard** (for engineers)
+and a **FastAPI** REST service (for integration with MES / production systems).
+
+---
 
 ## Dashboard
 
-![Dashboard Screenshot](docs/dashboard_screenshot.png?v=3)
-
-The dashboard lets you select any wafer and instantly see:
-
-- **Diagnostic Overview** — pass/fail prediction with the model's confidence
-- **Top Sensor Drivers** — which sensors influenced the prediction most (using SHAP, a model explainability method)
-- **Deviation from Healthy Baseline** — how far each sensor reading is from the normal range (measured in standard deviations, a.k.a. "z-scores")
-- **Sample vs Baseline Comparison** — side-by-side visual of this wafer vs the average passing wafer
-- **Failure Pattern Summary** — a plain-English diagnostic summary generated from the data (not an LLM)
+Run locally:
 
 ```bash
-streamlit run app/streamlit_app.py
+make app   # or: streamlit run app/streamlit_app.py
 ```
 
-## Project Status
-| Phase | Status |
-|---|---|
-| EDA & Data Cleaning | ✅ Complete |
-| Feature Engineering Pipeline | ✅ Complete |
-| Model Benchmarking + MLflow | ✅ Complete |
-| SHAP Explainability | ✅ Complete |
-| FastAPI Inference Service | ✅ Complete |
-| Yield Debug Dashboard (Streamlit) | ✅ Complete |
-| Failure Pattern Analysis Notebook | ✅ Complete |
-| Docker Deployment | ✅ Complete |
-| Drift Monitoring (PSI + KS) | ✅ Complete |
+Or open the live demo on Streamlit Community Cloud (link in the repo's About
+sidebar on GitHub). The dashboard is **zero-setup**: a 6 MB snapshot of the
+trained model and processed data is committed to `dashboard_assets/`, so it
+works immediately after cloning without running any notebooks.
 
-## Key Findings
+![Dashboard Screenshot](docs/dashboard_screenshot.png?v=3)
 
-### EDA (Exploratory Data Analysis)
-- **Class imbalance:** 93.4% of wafers pass, only 6.6% fail — the model needs special handling to avoid ignoring the rare failures
-- **Missing data:** 538 of 590 sensors have gaps; 4 sensors are dropped entirely (>50% missing), the rest are filled with the median value
-- **Constant sensors:** 140 sensors never change — they carry no useful information and are removed
-- **Redundant sensors:** 174 sensors are near-duplicates of others (correlation > 0.95) and are removed to avoid noise
+### Five pages, five distinct use cases
 
-### Feature Engineering Pipeline
+| Page | Question it answers | What you see |
+|---|---|---|
+| **Wafer Diagnostic** | *Why does the model think this wafer fails?* | Pass/fail prediction, SHAP bar chart of top driver sensors, Z-score deviation chart, side-by-side overlay of the wafer vs. healthy normal range, plain-English summary, full feature table. |
+| **Compare Wafers** | *Why did this wafer fail when that one passed?* | Side-by-side SHAP signatures and ranked Z-score differences for any two wafers. |
+| **Aggregate Metrics** | *How good is the model overall — and what's the trade-off?* | Live-tunable decision threshold that updates the confusion matrix, precision/recall/F1/ROC-AUC, ROC + PR curves, and probability-distribution histogram in real time. |
+| **Failure Clustering** | *Are all failures the same root cause, or distinct modes?* | K-means on SHAP signatures of every failed wafer, projected to 2-D via PCA. For each cluster, the top driver sensors are listed so you can name the failure mode. |
+| **Drift Monitor** | *Has the production line changed since training?* | Per-sensor PSI + KS tests for a recent batch (slice of dataset, or upload your own CSV) vs. the training distribution, with severity-coded summary cards and a top-25 most-drifted-sensors chart. |
 
-The raw data goes through a reduction pipeline before the model sees it:
+The copy throughout the dashboard is written for **non-technical readers** —
+each section opens with a "When to use this view" caption, and any technical
+term (SHAP, Z-score, PSI, precision/recall) is translated into plain English
+at the point of use. A "How to read this page" expander on the metrics page
+provides a one-screen glossary.
+
+---
+
+## Architecture
 
 ```
-590 raw sensor readings
- → Drop >50% missing (4 removed)                    586
- → Drop constant sensors (140 removed)              446  ← saved as X_clean.csv
- → Remove near-zero-variance + standardize           446
- → Remove highly correlated duplicates (|r| > 0.95)  272
- → Select top 50 by mutual information                50  ← what the model actually uses
+                      ┌──────────────────────┐
+                      │  SECOM raw sensors   │
+                      │  (1567 × 590, UCI)   │
+                      └──────────┬───────────┘
+                                 │ scripts/fetch_data.py  (sha256-verified)
+                                 ▼
+              src/preprocess.py  ─►  src/features.py
+              (impute, drop                (correlation prune,
+               constant, scale)             top-50 by mutual info)
+                                 │
+                                 ▼
+                       src/train.py      ──── 5-fold stratified CV
+                       (Random Forest          + F1-optimal threshold tuning
+                       w/ class_weight)        + drift_reference.json
+                                 │
+                                 ▼
+                  models/  +  dashboard_assets/  (committed snapshot)
+                                 │
+                ┌────────────────┼─────────────────┐
+                ▼                ▼                 ▼
+          app/streamlit_app   api/main.py      tests/  + CI
+          (5-page UI,         (FastAPI:        (pytest, ruff,
+           SHAP/PSI/KS)        /predict,        Docker smoke
+                               /predict/batch,   test on every push)
+                               /metadata,
+                               /drift,
+                               /health)
+                                 │
+                                 ▼
+                       Dockerfile + docker-compose.yml
+                       (3.11-slim base, healthcheck,
+                        boots in ~5s with bundled model)
 ```
 
-"Mutual information" measures how much knowing a sensor's value tells you about pass/fail — it captures non-linear relationships that simple correlation misses.
+Key design decisions:
 
-This pipeline is implemented in `src/preprocess.py` and `src/features.py`, and shared across
-training (`src/train.py`), the API (`api/main.py`), and the dashboard (`src/diagnostics.py`).
+- **`src/artifacts.py` centralizes pipeline loading** — a single
+  `load_pipeline_artifacts()` is consumed by the dashboard, the API, and the
+  tests, so the four artifacts (variance selector, scaler, MI-selected feature
+  list, RF model) and the tuned threshold can never drift between callers.
+- **`dashboard_assets/` is intentionally tracked.** Notebooks and `train.py`
+  write into gitignored `data/` and `models/` for full reproducibility, but
+  a 6 MB snapshot is committed so the dashboard and Docker image work on a
+  fresh clone with zero setup.
+- **The Docker image is self-contained.** It copies
+  `dashboard_assets/models/` into `/app/models/` at build time, so
+  `docker build .` works without any prior training step. CI smoke-tests
+  the container against `/health` and `/metadata` on every push.
+- **Drift reference is a 50 KB decile summary**, not the full training set —
+  so the API can compute PSI + KS at inference time without bundling 5 MB
+  of training data into the image.
 
-### Model Comparison
+---
 
-Three approaches were compared, all tracked with [MLflow](https://mlflow.org/) (an experiment tracking tool):
+## Results
+
+### Model comparison
+
+Three approaches were compared, all tracked with [MLflow](https://mlflow.org/):
 
 | Model | Type | ROC-AUC | Fail Recall | Fail F1 |
 |---|---|---|---|---|
 | Isolation Forest | Anomaly detection | 0.57 | 19% | 0.20 |
-| **Random Forest** | Classification | **0.80** | **67%** | **0.35** |
-| LSTM Autoencoder | Deep learning | 0.58 | 10% | 0.11 |
+| **Random Forest** | Supervised classification | **0.80** | **67%** | **0.35** |
+| LSTM Autoencoder | Deep learning (reconstruction) | 0.58 | 10% | 0.11 |
 
-**What the metrics mean:**
-- **ROC-AUC** (0-1): overall ranking quality — how well the model separates pass from fail
-- **Fail Recall**: of all actual failures, what percentage did the model catch?
-- **Fail F1**: balance between catching failures and not raising too many false alarms
+Random Forest wins decisively on this dataset, which is unsurprising: the failure
+signal is concentrated in a handful of sensors with non-linear thresholds —
+exactly what tree ensembles are good at — and there isn't enough data
+(~100 failures) for the deep model to learn a reliable representation.
 
-Random Forest was selected because it had the best overall performance. It uses class weighting to pay extra attention to the rare failure cases — missing a defective wafer is more costly than a false alarm in manufacturing.
+### Cross-validated headline numbers
 
-**Cross-validation and threshold tuning.** A single 80/20 split is high-variance with only ~21 fail samples in the test set, so `src/train.py` reports 5-fold stratified CV (mean ± std: ROC-AUC = 0.747 ± 0.044, PR-AUC = 0.215 ± 0.034) alongside the held-out validation metrics. The decision threshold is tuned on the validation set to maximize Fail-F1 — the F1-optimal threshold of **0.22** doubles fail recall (33% → 67%) compared to the default 0.5, at a small precision cost. The tuned value is persisted to `models/threshold.json` and loaded by both the API and the dashboard.
+A single 80/20 split is high-variance with only ~21 fail samples in the test
+set, so `src/train.py` reports **5-fold stratified CV** alongside the held-out
+metrics. From `dashboard_assets/models/cv_metrics.json`:
+
+- **ROC-AUC**: 0.747 ± 0.044
+- **PR-AUC** : 0.215 ± 0.034 (vs. 0.066 baseline = the failure rate itself)
+
+PR-AUC is the more informative number on this 6.6%-positive dataset — the
+model lifts precision-recall area-under-curve by roughly **3.3×** over a
+random classifier.
+
+### Threshold tuning
+
+The decision threshold is tuned on the validation set to maximize Fail-F1.
+The F1-optimal threshold of **0.222** roughly **doubles fail recall** (33% → 67%)
+versus the default 0.5, at a small precision cost — a sensible trade-off in
+manufacturing where missing a defect is more expensive than a false alarm.
+The tuned value lives in `models/threshold.json` and is loaded automatically
+by both the API and the dashboard.
 
 ### Explainability
 
-SHAP (SHapley Additive exPlanations) breaks each prediction into per-sensor contributions, answering "why did the model predict FAIL for this wafer?" A small subset of sensors drives most predictions — **sensor_103** and **sensor_59** have the highest average impact. Their behavior shows non-linear threshold effects: the sensor reading is fine until it crosses a certain value, then failure risk jumps sharply.
+A small subset of sensors drives most predictions — `sensor_103` and `sensor_59`
+have the highest average SHAP impact across the dataset. Their behavior shows
+non-linear threshold effects: the reading is fine until it crosses a critical
+value, then failure risk jumps sharply (visible on the "Top Sensor Drivers"
+panel of any failed wafer in the dashboard).
 
-## API
+For full intended use, training data details, evaluation, and limitations,
+see [`MODEL_CARD.md`](MODEL_CARD.md).
 
-A [FastAPI](https://fastapi.tiangolo.com/) endpoint provides the same prediction + explanation as the dashboard, but as a REST API (useful for integrating with other systems):
+---
 
-| Endpoint | Purpose |
+## Tech stack
+
+| Layer | Tools |
 |---|---|
-| `GET /health` | liveness check + lightweight pipeline metadata |
-| `GET /metadata` | full pipeline + model info, including selected feature names |
-| `POST /predict` | single wafer prediction with SHAP explanation |
-| `POST /predict/batch` | many wafers in one call (no SHAP, optimized) |
-| `POST /drift` | PSI report for a recent batch vs the training baseline |
+| Modeling | scikit-learn (RandomForest, mutual-info selection, calibration helpers), SHAP, scipy (KS test), MLflow (experiment tracking) |
+| Data / pipelines | numpy, pandas, joblib (artifact persistence) |
+| Dashboard | Streamlit, Plotly (dark-themed, interactive) |
+| API | FastAPI + uvicorn, Pydantic v2 schemas, structured request logging, CORS, X-Request-ID |
+| Deployment | Docker (`python:3.11-slim`), `docker-compose`, healthchecks, sha256-verified data fetcher |
+| Quality | pytest (50+ tests across 6 modules), ruff (lint + format), pre-commit hooks |
+| CI/CD | GitHub Actions: matrix on Python 3.11 & 3.12, lint, test, Docker build + smoke test |
+| Reproducibility | Makefile, `.python-version`, `pyproject.toml`, model card, dataset hash pinning |
+
+---
+
+## Repo structure
 
 ```
-POST /predict
-{
-    "features": [0.23, -1.1, 0.88, ...]   // 446 sensor readings for one wafer
-}
-
-→ returns:
-{
-    "prediction": "FAIL",
-    "probability": 0.87,
-    "top_contributing_features": [
-        {"feature": "sensor_59",  "shap_value": 0.142},
-        {"feature": "sensor_103", "shap_value": 0.098},
-        ...
-    ]
-}
-```
-
-```bash
-uvicorn api.main:app --reload --port 8000
-```
-
-The API also adds an `X-Request-ID` header to every response and emits
-structured `event=request request_id=... method=... path=... status=... latency_ms=...`
-logs for easy aggregation. CORS origins are configurable via the
-`CORS_ORIGINS` env var (comma-separated list, default `*` for dev).
-
-## Repo Structure
-```
+.
 ├── app/
-│   └── streamlit_app.py              # Yield Debug Dashboard
+│   └── streamlit_app.py           # 5-page Streamlit dashboard
 ├── api/
-│   └── main.py                       # FastAPI inference endpoint + SHAP
-├── notebooks/
-│   ├── 01_eda.ipynb                  # Data loading & exploratory analysis
-│   ├── 02_modeling.ipynb             # Feature engineering & baseline models
-│   ├── 03_model_comparison.ipynb     # Multi-model comparison + MLflow
-│   ├── 04_explainability.ipynb       # SHAP analysis (Random Forest)
-│   └── 05_yield_debug_analysis.ipynb # Failure investigation & pattern clustering
+│   └── main.py                    # FastAPI service (5 endpoints + CORS + logging)
 ├── src/
-│   ├── preprocess.py                 # Variance filter, scaling, imputation
-│   ├── features.py                   # Correlation filter, MI selection
-│   ├── train.py                      # Train RF + save pipeline artifacts
-│   └── diagnostics.py                # "Normal" baseline analysis, deviation
-│                                     #   measurement, diagnostic summary generation
-├── dashboard_assets/                 # Committed snapshot for zero-setup demos
-│   ├── data/                         #   X_clean.csv, y.csv (~4.8 MB)
-│   └── models/                       #   rf_model.joblib + pipeline artifacts (~1.3 MB)
-├── tests/
-│   └── test_api.py                   # API smoke tests
-├── data/                             # gitignored — generated by notebooks
-├── models/                           # gitignored — generated by train.py
-├── Dockerfile
-├── requirements.txt                  # Streamlit Cloud / dashboard runtime deps
-├── requirements-dev.txt              # Full dev deps (notebooks, training, API)
+│   ├── preprocess.py              # impute, drop constant, scale
+│   ├── features.py                # correlation prune + mutual-info top-50
+│   ├── models.py                  # RF builder, CV runner, threshold tuner
+│   ├── train.py                   # train + CV + threshold tuning + drift baseline
+│   ├── diagnostics.py             # baseline analysis, deviation scoring, summaries
+│   ├── drift.py                   # PSI + KS, decile-summary persistence
+│   └── artifacts.py               # single source of truth for loading pipeline
+├── notebooks/
+│   ├── 01_eda.ipynb               # exploratory data analysis
+│   ├── 02_modeling.ipynb          # baseline models
+│   ├── 03_model_comparison.ipynb  # IF / RF / LSTM-AE + MLflow
+│   ├── 04_explainability.ipynb    # SHAP deep-dive on the RF
+│   └── 05_yield_debug_analysis.ipynb  # failure pattern clustering
+├── tests/                         # pytest suite (api, preprocess, features,
+│   ├── test_api.py                #   diagnostics, models, drift) — runs in CI
+│   ├── test_preprocess.py
+│   ├── test_features.py
+│   ├── test_diagnostics.py
+│   ├── test_models.py
+│   ├── test_drift.py
+│   └── conftest.py
+├── scripts/
+│   └── fetch_data.py              # sha256-verified UCI SECOM downloader
+├── dashboard_assets/              # COMMITTED 6 MB snapshot for zero-setup demos
+│   ├── data/                      #   X_clean.csv, y.csv
+│   └── models/                    #   rf_model.joblib, scaler, var_selector,
+│                                  #   threshold.json, cv_metrics.json,
+│                                  #   drift_reference.json
+├── .github/workflows/ci.yml       # lint + test (Py 3.11 & 3.12) + Docker smoke test
+├── .pre-commit-config.yaml        # ruff, trailing-whitespace, EOF, large-file checks
+├── pyproject.toml                 # ruff config, pytest config
+├── Dockerfile                     # python:3.11-slim, healthcheck, ~100 MB
+├── docker-compose.yml             # one-command API stack
+├── Makefile                       # install/test/lint/app/api/docker/snapshot/clean
+├── MODEL_CARD.md                  # intended use, training data, metrics, limitations
+├── requirements.txt               # runtime: dashboard + API
+├── requirements-dev.txt           # + notebooks, training, tests, lint
 └── README.md
 ```
 
-### About `dashboard_assets/`
-
-The `data/` and `models/` directories are gitignored because they are generated
-by running the notebooks and `src/train.py`. However, the Streamlit dashboard
-needs that processed data and a trained model to display anything.
-
-To make the dashboard work **immediately after cloning** (no notebooks, no training
-required), a snapshot of the necessary files is committed in `dashboard_assets/`.
-The dashboard checks this directory first, and falls back to `data/` + `models/` if
-it's missing. This keeps the full pipeline untouched while making the demo
-self-contained (~6 MB total).
-
-## Dependencies
-
-**Supported Python: 3.11 or 3.12** (CI exercises both). The version is
-declared in `.python-version` (for `pyenv` / `uv` users), in
-`pyproject.toml` (`tool.ruff.target-version`), in the `Dockerfile`
-base image, and in the CI matrix. To raise the minimum version, all
-four locations need updating in lockstep.
-
-This project uses two requirements files:
-
-| File | What it covers | When to use |
-|---|---|---|
-| `requirements.txt` | Dashboard + API runtime (numpy, pandas, scipy, scikit-learn, joblib, plotly, shap, streamlit, fastapi, uvicorn) | Streamlit Cloud deploys from this automatically. Also what the Docker image installs to serve the API. Sufficient if you only want to run the dashboard or API locally. |
-| `requirements-dev.txt` | Everything above **plus** torch, mlflow, jupyter, matplotlib, seaborn, pytest, ruff, httpx | Local development — running notebooks, training models, running tests and lint. |
-
-`requirements-dev.txt` inherits from `requirements.txt` via `-r requirements.txt`,
-so you only ever need to install one of them.
+---
 
 ## Setup
 
-### Quick Start (dashboard only)
-
-The dashboard works immediately after cloning — no data download or training needed.
+### Quick start (dashboard only — no setup)
 
 ```bash
 pip install -r requirements.txt
@@ -224,15 +290,19 @@ make install   # runtime deps only
 make app       # streamlit dashboard
 ```
 
-### Full Pipeline (EDA → training → dashboard)
+The dashboard is **immediately functional** because the trained model and
+processed data are checked in under `dashboard_assets/` (~6 MB). No data
+download or training step required.
+
+### Full pipeline (EDA → training → dashboard)
 
 To reproduce the full workflow from scratch:
 
 ```bash
-make install-dev          # 1. install all deps
-make fetch-data           # 2. download SECOM (hash-verified) into data/raw/
+make install-dev          # 1. install all deps (notebooks, training, tests)
+make fetch-data           # 2. sha256-verified download of SECOM into data/raw/
 jupyter notebook notebooks/01_eda.ipynb   # 3. produces data/processed/
-make train                # 4. produces models/
+make train                # 4. produces models/ + threshold.json + drift_reference.json
 make snapshot             # 5. (optional) refresh dashboard_assets/ from models/
 make app                  # 6. launch dashboard
 make api                  # 7. (optional) launch FastAPI on :8000
@@ -240,7 +310,7 @@ make api                  # 7. (optional) launch FastAPI on :8000
 
 ### Docker
 
-A pre-built API image is wired up via `docker-compose.yml`:
+A self-contained API image is wired up via `docker-compose.yml`:
 
 ```bash
 make docker-up    # build + start the API on http://localhost:8000
@@ -248,39 +318,123 @@ curl http://localhost:8000/health
 make docker-down
 ```
 
-The Dockerfile uses `dashboard_assets/models/` as the bundled model
-directory, so `docker build .` works on a fresh clone without needing
-to retrain.
+The Dockerfile bundles `dashboard_assets/models/` into the image, so
+`docker build .` works on a fresh clone — no training required. The image is
+~100 MB and boots in under 5 seconds.
 
-For the full Random Forest model card (intended use, training data,
-metrics, and limitations), see [`MODEL_CARD.md`](MODEL_CARD.md).
+---
 
-## Technical Approach
-- **Preprocessing:** Fill missing values with medians, remove constant sensors, standardize scales
-- **Feature Selection:** Remove near-duplicate sensors, then select the top 50 most informative sensors using mutual information
-- **Models Compared:** Isolation Forest (anomaly detection), Random Forest (classification, deployed), LSTM Autoencoder (deep learning)
-- **Handling Rare Failures:** Class weighting gives extra importance to the rare fail cases during training
-- **Experiment Tracking:** MLflow logs every model's parameters, metrics, and artifacts for reproducibility
-- **Explainability:** SHAP breaks each prediction into per-sensor contributions so you can see *why* the model predicted fail
-- **Diagnostics:** Baseline deviation analysis (how far from normal?), failure clustering (are failures similar to each other?), and auto-generated plain-English summaries
-- **Serving:** FastAPI REST endpoint with SHAP explanations, Dockerized for deployment
-- **Dashboard:** Streamlit interactive tool for inspecting individual wafers
+## API
 
-### Drift Monitoring
+A [FastAPI](https://fastapi.tiangolo.com/) service mirrors the dashboard's
+prediction logic as a REST API for integration with MES, dashboards, or
+downstream systems.
 
-Manufacturing processes drift over time. The dashboard's **Drift Monitor**
-tab and the API's `/drift` endpoint compute, per sensor:
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Liveness check + lightweight pipeline metadata. |
+| `GET /metadata` | Full pipeline & model info — version, feature counts, decision threshold, selected feature names. |
+| `POST /predict` | Single-wafer prediction with top-K SHAP explanation. |
+| `POST /predict/batch` | High-throughput batch predictions (no SHAP, vectorized). |
+| `POST /drift` | PSI report for a recent batch vs. the training baseline. |
 
-- **Population Stability Index (PSI)** — bucketed KL-style score against
-  the training distribution. Conventional thresholds: `<0.10` stable,
-  `0.10–0.25` moderate, `>0.25` significant (consider retraining).
+Example:
+
+```http
+POST /predict
+{
+    "features": [0.23, -1.1, 0.88, ...]   // 446 sensor readings
+}
+```
+
+Returns:
+
+```json
+{
+    "prediction": "FAIL",
+    "probability": 0.87,
+    "decision_threshold": 0.222,
+    "top_contributing_features": [
+        {"feature": "sensor_59",  "shap_value": 0.142},
+        {"feature": "sensor_103", "shap_value": 0.098}
+    ]
+}
+```
+
+Run locally:
+
+```bash
+uvicorn api.main:app --reload --port 8000
+# Configurable env vars: MODEL_DIR, LOG_LEVEL, CORS_ORIGINS, MAX_BATCH_SIZE
+```
+
+The API also:
+
+- Adds an **`X-Request-ID`** header to every response.
+- Emits **structured key-value logs** —
+  `event=request request_id=... method=... path=... status=... latency_ms=...` —
+  for easy aggregation in Datadog / CloudWatch / Loki.
+- Honours **CORS** via `CORS_ORIGINS` (comma-separated, default `*` for dev).
+- Exposes a **Pydantic v2** schema for every request/response (auto-docs at `/docs`).
+
+---
+
+## Drift monitoring
+
+Manufacturing processes drift over time — sensor calibrations change,
+raw-material lots vary, equipment ages. The dashboard's **Drift Monitor** page
+and the API's `/drift` endpoint compute, per sensor:
+
+- **PSI (Population Stability Index)** — bucketed KL-style score against the
+  training distribution. Industry-standard thresholds: `< 0.10` stable,
+  `0.10–0.25` moderate, `> 0.25` significant (consider retraining).
 - **Two-sample Kolmogorov–Smirnov test** — non-parametric p-value for
-  "these two samples come from the same distribution".
+  *"these two samples come from the same distribution"*.
 
-The training run persists `models/drift_reference.json` (decile summary,
-~50 KB) so PSI can be computed at serving time without keeping the full
+The training run persists `models/drift_reference.json` (decile summary, ~50 KB)
+so the API can compute PSI + KS at inference time without keeping the full
 training set around.
 
-## Future Work
-- Integration with manufacturing execution systems (MES) for real-time tracking
-- Build a library of known failure patterns from past investigations
+---
+
+## Engineering quality
+
+- **Tests** — pytest suite across 6 modules (api, preprocess, features,
+  diagnostics, models, drift); the `/predict`, `/predict/batch`, `/drift`,
+  `/health`, and `/metadata` endpoints are all covered, including malformed
+  input handling.
+- **CI** — every push runs lint (`ruff`), the full pytest suite on Python
+  **3.11 and 3.12** in parallel (`fail-fast: false`), then a **Docker job**
+  that builds the image and smoke-tests `/health` and `/metadata` against
+  the running container. Container logs are dumped on smoke-test failure
+  via an `EXIT` trap so regressions surface the actual root cause.
+- **Lint & format** — `ruff` configured in `pyproject.toml`; identical rules
+  enforced locally via `.pre-commit-config.yaml` (ruff, trailing whitespace,
+  EOF newline, YAML check, large-file guard, merge-conflict guard).
+- **Reproducibility** — `Makefile` for one-command setup/test/run/build,
+  sha256-verified data fetcher, supported Python pinned in **four canonical
+  locations** (`.python-version`, `pyproject.toml`, `Dockerfile`, CI matrix),
+  documented model card.
+- **Observability** — structured single-line key-value logs (filterable on
+  `event=`, `request_id=`, `path=`), per-request latency in milliseconds,
+  Docker `HEALTHCHECK` pinging `/health` every 30 s.
+
+---
+
+## Model card
+
+For full intended use, training data details, evaluation methodology,
+limitations, ethical considerations, and reproduction steps, see
+[`MODEL_CARD.md`](MODEL_CARD.md).
+
+---
+
+## Future work
+
+- Integration with manufacturing execution systems (MES) for real-time wafer scoring.
+- Build a library of named, labeled failure modes from past investigations to
+  turn the unsupervised clustering into a supervised "what kind of failure is
+  this?" classifier.
+- Time-series-aware features (sensor trends per lot/shift), since SECOM only
+  exposes a single snapshot per wafer.
+- Model retraining pipeline triggered by drift alerts.

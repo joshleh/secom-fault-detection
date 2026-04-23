@@ -1,12 +1,14 @@
 """
-Semiconductor Yield Fault Detection
+Semiconductor Yield Fault Detection — Streamlit dashboard.
 
-Interactive tool for inspecting individual wafers from a manufacturing
-dataset. For each wafer, the dashboard shows:
-  - pass/fail prediction from a trained Random Forest model
-  - which sensors influenced the prediction most (SHAP)
-  - how the wafer's readings compare to "normal" (passing) wafers
-  - a plain-English diagnostic summary
+A five-page tool for working with a trained pass/fail classifier on the
+SECOM semiconductor dataset:
+
+  1. Wafer Diagnostic    — drill into one wafer (prediction + SHAP + Z-score)
+  2. Compare Wafers      — side-by-side diff of two wafers' SHAP signatures
+  3. Aggregate Metrics   — model-wide precision/recall/ROC at any threshold
+  4. Failure Clustering  — K-means on SHAP signatures to surface failure modes
+  5. Drift Monitor       — PSI + KS test of a recent batch vs. training data
 
 Run:  streamlit run app/streamlit_app.py
 """
@@ -113,9 +115,13 @@ def render_compare_page(pipeline):
     """Side-by-side comparison of two wafers."""
     st.title("Compare Two Wafers")
     st.markdown(
-        "Pick any two wafers to see how their predictions, top SHAP drivers, "
-        "and sensor deviations differ. Useful for understanding what makes a "
-        "specific failure unusual relative to a normal wafer."
+        "**When to use this view:** *Why did this wafer fail when that one passed?* "
+        "Pick any two wafers — typically one failure and one healthy reference — "
+        "and see exactly what's different about their sensor patterns. The chart "
+        "shows, per sensor, how strongly each one pushed each wafer toward FAIL "
+        "(check the legend to see which color is which wafer). Sensors with very "
+        "different bars between the two wafers are the ones to focus on. The table "
+        "at the bottom ranks those differences by absolute size."
     )
 
     col_a, col_b = st.columns(2)
@@ -208,11 +214,32 @@ def render_metrics_page(pipeline):
 
     st.title("Aggregate Model Metrics")
     st.markdown(
-        "Held-out predictions over the entire dataset. Drag the threshold "
-        "slider to see how the confusion matrix and operating point shift "
-        "in real time. The dashed line on the PR/ROC curves marks the "
-        "currently-selected threshold."
+        "**When to use this view:** *How good is the model overall, and what's "
+        "the trade-off?* Catching every failure (high **recall**) usually means "
+        "raising more false alarms (lower **precision**), and vice versa. The "
+        "**decision threshold** below is the dial that controls that trade-off — "
+        "drag it and watch every metric and chart on the page update live."
     )
+
+    with st.expander("How to read this page (quick glossary)"):
+        st.markdown(
+            "- **Decision threshold** — the failure probability above which the "
+            "model says \"FAIL.\" Lower threshold → more wafers flagged (catches "
+            "more real failures but more false alarms). Higher threshold → fewer "
+            "alarms but you miss more failures.\n"
+            "- **Precision (Fail)** — *of the wafers we flagged, what fraction "
+            "actually failed?* High precision = few false alarms.\n"
+            "- **Recall (Fail)** — *of the wafers that actually failed, what "
+            "fraction did we catch?* High recall = few escapes to the customer.\n"
+            "- **F1** — harmonic mean of precision and recall (single balanced score).\n"
+            "- **ROC-AUC** — overall ranking quality, threshold-independent. "
+            "1.0 is perfect, 0.5 is random guessing.\n"
+            "- **Confusion matrix** — counts of correct vs. wrong calls:\n"
+            "    - **TN** (true negative) = healthy wafer correctly cleared\n"
+            "    - **TP** (true positive) = failure correctly caught\n"
+            "    - **FP** (false positive) = false alarm (healthy wafer flagged)\n"
+            "    - **FN** (false negative) = missed failure (escaped to customer)"
+        )
 
     preds = _predict_all(pipeline)
     y_true = preds["actual"].values
@@ -345,10 +372,18 @@ def render_clustering_page(pipeline):
 
     st.title("Failure Pattern Clustering")
     st.markdown(
-        "Each failed wafer has a SHAP signature — a 50-dimensional vector "
-        "of how strongly each sensor pushed the model toward FAIL. K-means "
-        "groups failures with similar signatures, surfacing distinct "
-        "**failure modes** rather than treating every defect as one big class."
+        "**When to use this view:** *Are all failures the same root cause, or "
+        "are there a few distinct patterns?* Treating every defect as one big "
+        "category hides the structure — in practice you usually have, say, a "
+        "thermal-instability cluster, a pressure-related cluster, and a "
+        "contamination cluster, each needing a different fix.\n\n"
+        "This page takes every failed wafer, looks at *which sensors drove its "
+        "failure* (its SHAP \"signature\"), and groups wafers with similar "
+        "signatures together using K-means clustering. Each group is a "
+        "**failure mode**. The scatter plot below is a 2-D projection (PCA) "
+        "of those signatures so groups are visible at a glance — the table "
+        "underneath lists the top driver sensors per mode, which tells you "
+        "*what's distinctive* about each one."
     )
 
     fail_shap = _failure_shap_matrix(pipeline)
@@ -438,15 +473,21 @@ def render_drift_page(pipeline):
     """Population Stability Index + KS test against the training baseline."""
     st.title("Drift Monitor")
     st.markdown(
-        "Manufacturing processes drift over time — sensor calibrations change, "
-        "raw-material lots vary, equipment ages. This page measures whether a "
-        "recent batch of wafers still looks statistically like the data the model "
-        "was trained on. Two complementary tests per sensor:\n\n"
-        "- **Population Stability Index (PSI)** — bucketed KL-style score. "
-        "Conventional thresholds: <0.10 stable, 0.10–0.25 moderate drift, "
-        ">0.25 significant drift (consider retraining).\n"
-        "- **Two-sample Kolmogorov–Smirnov test** — non-parametric p-value for "
-        "\"these two samples come from the same distribution\"."
+        "**When to use this view:** *Has the production line changed since we "
+        "trained the model?* Manufacturing processes drift over time — sensor "
+        "calibrations change, raw-material lots vary, equipment ages. When the "
+        "live data starts to look meaningfully different from what the model "
+        "was trained on, predictions stop being reliable and the model needs "
+        "retraining.\n\n"
+        "This page compares a recent batch of wafers (you choose) against the "
+        "training data, sensor by sensor. Each sensor gets two scores:\n\n"
+        "- **PSI (Population Stability Index)** — *how shifted is the "
+        "distribution?* Industry-standard thresholds: **< 0.10 stable**, "
+        "**0.10–0.25 moderate drift**, **> 0.25 significant drift** (retrain).\n"
+        "- **KS test** — a statistical p-value for \"these two samples came "
+        "from the same distribution.\" Tiny p-value → they didn't.\n\n"
+        "The summary cards and bar chart below tell you, at a glance, how many "
+        "sensors have drifted and which ones drifted the most."
     )
 
     st.markdown("### Choose a comparison")
@@ -559,10 +600,21 @@ def main():
     # ── Header ────────────────────────────────────────────
     st.title("Semiconductor Yield Fault Detection")
     st.markdown(
-        "Each row in this dataset represents one semiconductor wafer tested on a production line. "
-        "Hundreds of sensors monitor the manufacturing process — this tool uses a trained ML model "
-        "to predict whether a wafer will pass or fail quality inspection, and then explains "
-        "**which sensors contributed most** to that prediction and **how far they deviate from normal**."
+        "**What is this?** A semiconductor wafer is a thin slice of silicon that "
+        "future microchips are built on. As each wafer moves through a production "
+        "line, hundreds of sensors record temperature, pressure, gas flow, voltages, "
+        "and so on. After production, a quality test marks the wafer as **PASS** or "
+        "**FAIL**.\n\n"
+        "**What this tool does.** It uses a trained machine-learning model to "
+        "predict pass/fail from sensor readings *and* explain its reasoning — "
+        "which sensors looked most suspicious, and how far off they were from a "
+        "healthy baseline. That makes it useful both for **catching failures "
+        "early** and for **pointing engineers at the right sensors to investigate**."
+    )
+
+    st.info(
+        "Use the **View** menu in the sidebar to switch between five tools — "
+        "from drilling into a single wafer to monitoring the production line as a whole."
     )
 
     with st.expander("About this project & dataset"):
@@ -574,10 +626,12 @@ def main():
             "protect proprietary process details, so they appear as numeric IDs (e.g. Feature 1, "
             "Feature 155) rather than physical sensor names.\n\n"
             "Only ~6.6% of wafers in the dataset failed inspection, making this a heavily imbalanced "
-            "classification problem. The ML pipeline behind this dashboard reduces the 590 raw sensors "
-            "down to the 50 most informative features using variance filtering, correlation pruning, "
-            "and mutual information ranking, then trains a class-weighted Random Forest to handle "
-            "the imbalance.\n\n"
+            "classification problem (a model that always guessed 'PASS' would be 93% accurate "
+            "while catching zero failures — so accuracy alone is misleading). The ML pipeline behind "
+            "this dashboard reduces the 590 raw sensors down to the 50 most informative features using "
+            "variance filtering, correlation pruning, and mutual-information ranking, then trains a "
+            "class-weighted Random Forest with a recall-tuned decision threshold to handle the "
+            "imbalance.\n\n"
             "For the full training pipeline, model comparison (Isolation Forest, Random Forest, "
             "LSTM Autoencoder), SHAP analysis notebooks, and FastAPI inference endpoint, see the "
             "[GitHub repository](https://github.com/joshleh/secom-fault-detection)."
@@ -604,8 +658,13 @@ def main():
             "Drift Monitor",
         ],
         index=0,
-        help="Per-wafer drilldown, side-by-side comparison, model-wide metrics, "
-             "or population-level monitoring.",
+        help=(
+            "• Wafer Diagnostic — investigate one wafer in detail.\n"
+            "• Compare Wafers — see what's different between two wafers.\n"
+            "• Aggregate Metrics — how good is the model overall?\n"
+            "• Failure Clustering — group failures into distinct failure modes.\n"
+            "• Drift Monitor — has the production line changed since training?"
+        ),
     )
     st.sidebar.markdown("---")
 
@@ -625,8 +684,10 @@ def main():
     # ── Sidebar: Sample selection ─────────────────────────
     st.sidebar.header("Select a Wafer")
     st.sidebar.caption(
-        "Each wafer in the dataset came from the production line. "
-        "Pick a wafer by its number, or filter to only see wafers that passed or failed."
+        "Pick any wafer by number, or filter the list to show only passes / "
+        "only failures. \"Manual sensor override\" lets you tweak a wafer's "
+        "readings to see how the prediction would change — useful for "
+        "what-if analysis."
     )
 
     mode = st.sidebar.radio(
@@ -706,6 +767,12 @@ def main():
 
     # ── Panel 1: Wafer Diagnostic Overview ──
     st.header("Wafer Diagnostic Overview")
+    st.caption(
+        "**When to use this view:** A specific wafer was flagged on the line, "
+        "or you want to understand *why* the model predicts pass/fail for one "
+        "wafer in particular. The four cards below summarize what the model "
+        "says, what actually happened, and whether the two agree."
+    )
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -727,12 +794,18 @@ def main():
                   help="Did the model's prediction agree with the real outcome?")
 
     # ── Panel 2: Top Sensor Drivers (SHAP) ──
-    st.header("Top Sensor Drivers")
+    st.header("Top Sensor Drivers — *what made the model decide this?*")
     st.markdown(
-        "Each bar shows how much a single sensor influenced the model's prediction for this sample. "
-        "This uses [SHAP](https://shap.readthedocs.io/) (SHapley Additive exPlanations), a method "
-        "that breaks down a prediction into per-feature contributions. "
-        "**Red bars** push toward FAIL; **blue bars** push toward PASS."
+        "Each bar is one sensor and shows how much that single sensor swung the "
+        "prediction up or down. Think of it as *credit assignment*: the model "
+        "starts from a neutral guess and each sensor reading pushes the verdict "
+        "a little toward PASS or FAIL.\n\n"
+        "- **Red bars** → this sensor's reading raised the failure probability.\n"
+        "- **Blue bars** → this sensor's reading lowered it.\n"
+        "- Longer bars = bigger influence.\n\n"
+        "Under the hood this uses [SHAP](https://shap.readthedocs.io/) "
+        "(SHapley Additive exPlanations), the standard method for breaking down "
+        "an individual ML prediction into per-feature contributions."
     )
 
     top_features = diag.top_shap_features[:top_k]
@@ -759,13 +832,20 @@ def main():
     st.plotly_chart(fig_shap, use_container_width=True)
 
     # ── Panel 3: Deviation from Healthy Baseline ──
-    st.header("Deviation from Healthy Baseline")
+    st.header("Deviation from Healthy Baseline — *how unusual are the readings?*")
     st.markdown(
-        f"The \"baseline\" is the average sensor behavior across **{pipeline.baseline.n_samples} wafers "
-        f"that passed** quality inspection — this represents what normal production looks like. "
-        f"The Z-score measures how many standard deviations this sample's reading is from that "
-        f"normal average. A Z-score beyond **±2** means the sensor reading is unusually high or low "
-        f"compared to healthy wafers (highlighted in the table)."
+        f"The model's verdict is more actionable when paired with the question: "
+        f"*are these sensors actually behaving abnormally, or did the model just "
+        f"latch onto noise?* This panel answers that.\n\n"
+        f"The **baseline** is the average behavior of every sensor across "
+        f"**{pipeline.baseline.n_samples} wafers that passed** quality inspection — "
+        f"i.e., \"what normal production looks like.\" The **Z-score** below "
+        f"says how many standard deviations this wafer's reading sits away from "
+        f"that normal average:\n\n"
+        f"- |Z| < 1 → essentially normal\n"
+        f"- 1 ≤ |Z| < 2 → mild deviation\n"
+        f"- |Z| ≥ 2 → unusually high or low (highlighted in the table)\n"
+        f"- |Z| ≥ 3 → very rare under normal conditions — worth investigating first"
     )
 
     comparison_df = pipeline.get_baseline_comparison_df(diag, features=top_features)
@@ -810,11 +890,15 @@ def main():
         st.dataframe(styled, use_container_width=True, hide_index=True)
 
     # ── Panel 4: Sample vs Baseline Overlay ──
-    st.header("Sample vs Baseline Comparison")
+    st.header("This Wafer vs Normal Range — *visual check*")
     st.markdown(
-        "Blue bars show the normal range (mean ± 1 standard deviation) for each sensor across "
-        "passing wafers. Red diamonds show this sample's actual values. When a diamond falls "
-        "far outside the blue bar, that sensor is behaving abnormally for this wafer."
+        "Same idea as the Z-score chart above, but plotted on the original sensor "
+        "scale so the size of each deviation is easier to eyeball.\n\n"
+        "- **Blue bars with whiskers** = the normal operating range for each "
+        "sensor (mean ± 1 standard deviation, computed from passing wafers).\n"
+        "- **Red diamonds** = this wafer's actual reading.\n\n"
+        "Whenever a diamond sits far outside the blue bar, that sensor was running "
+        "abnormally for this wafer."
     )
 
     overlay_features = top_features[:min(10, len(top_features))]
@@ -852,11 +936,12 @@ def main():
     st.plotly_chart(fig_overlay, use_container_width=True)
 
     # ── Panel 5: Preliminary Failure Pattern Summary ──
-    st.header("Preliminary Failure Pattern Summary")
+    st.header("Plain-English Summary — *where would I start investigating?*")
     st.markdown(
-        "*This summary is generated automatically from the model output and deviation data above — "
-        "not by an LLM. It combines which sensors the model relied on most with which sensors "
-        "deviate furthest from normal to suggest where to investigate.*"
+        "*Auto-generated from the charts above (no LLM, no hallucination risk). "
+        "It cross-references which sensors the model relied on most with which "
+        "sensors deviate furthest from normal, so a process engineer has an "
+        "immediate shortlist of suspects to check.*"
     )
 
     summary_text = generate_root_cause_summary(diag, pipeline.baseline, top_k=5)
