@@ -244,20 +244,36 @@ def render_metrics_page(pipeline):
     with col_cm:
         st.markdown("#### Confusion matrix")
         cm_z = [[int(tn), int(fp)], [int(fn), int(tp)]]
-        cm_text = [
-            [f"TN<br>{tn}", f"FP<br>{fp}"],
-            [f"FN<br>{fn}", f"TP<br>{tp}"],
+        # Per-cell text color: white on dark fills, near-black on light fills,
+        # so labels stay readable regardless of cell magnitude on the Blues scale.
+        cm_max = max(int(tn), int(fp), int(fn), int(tp), 1)
+        threshold_intensity = 0.5
+        cm_text_colors = [
+            [
+                "#FFFFFF" if (cm_z[i][j] / cm_max) >= threshold_intensity else "#0E1117"
+                for j in range(2)
+            ]
+            for i in range(2)
         ]
-        fig_cm = go.Figure(go.Heatmap(
+        fig_cm = go.Figure()
+        fig_cm.add_trace(go.Heatmap(
             z=cm_z,
             x=["Pred PASS", "Pred FAIL"],
             y=["Actual PASS", "Actual FAIL"],
-            text=cm_text,
-            texttemplate="%{text}",
-            textfont={"size": 14, "color": "#FFFFFF"},
             colorscale="Blues",
             showscale=False,
+            hovertemplate="%{y} / %{x}: %{z}<extra></extra>",
         ))
+        labels = [["TN", "FP"], ["FN", "TP"]]
+        for i in range(2):
+            for j in range(2):
+                fig_cm.add_annotation(
+                    x=["Pred PASS", "Pred FAIL"][j],
+                    y=["Actual PASS", "Actual FAIL"][i],
+                    text=f"<b>{labels[i][j]}</b><br>{cm_z[i][j]}",
+                    showarrow=False,
+                    font=dict(size=14, color=cm_text_colors[i][j]),
+                )
         fig_cm.update_layout(height=320, margin=dict(l=20, r=20, t=20, b=20), **PLOTLY_LAYOUT)
         st.plotly_chart(fig_cm, use_container_width=True)
 
